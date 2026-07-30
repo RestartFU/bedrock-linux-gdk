@@ -5,8 +5,8 @@ describe BedrockLinuxGdk::XboxAuth do
     root = "/profiles/player-two"
     BedrockLinuxGdk::XboxAuth.oauth_path(root)
       .should eq("/profiles/player-two/auth/oauth-session")
-    BedrockLinuxGdk::XboxAuth.preauth_path(root)
-      .should eq("/profiles/player-two/auth/xbox-session.json")
+    BedrockLinuxGdk::XboxAuth.bridge_path(root)
+      .should eq("/profiles/player-two/auth/xbox-bridge-session")
   end
 
   it "seeds and replaces a per-session Wine refresh token" do

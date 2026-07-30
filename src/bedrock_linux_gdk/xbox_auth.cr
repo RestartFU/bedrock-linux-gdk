@@ -97,6 +97,10 @@ module BedrockLinuxGdk
       File.join(root, "auth", "oauth-session")
     end
 
+    def bridge_path(root : String) : String
+      File.join(root, "auth", "xbox-bridge-session")
+    end
+
     def seed_refresh_token(root : String, token : String) : Nil
       raise "Microsoft refresh token is invalid." if token.empty? ||
                                                      token.includes?('\0') ||
@@ -152,6 +156,7 @@ module BedrockLinuxGdk
         refresh_token,
         Time.utc.to_unix + expires_in
       )
+      write_bridge_session(root, payload)
       user_id = required_string(payload, "xbl_xuid")
       gamertag = optional_string(payload, "xbl_gamertag") || ""
 
@@ -185,6 +190,39 @@ module BedrockLinuxGdk
         "#{expiry}\n#{access_token}\n#{refresh_token}\n",
         perm: 0o600
       )
+      File.rename(temporary, path)
+    ensure
+      File.delete(temporary) if temporary && File.file?(temporary)
+    end
+
+    private def write_bridge_session(root : String, payload : JSON::Any) : Nil
+      privileges = payload.as_h.has_key?("xbl_privileges") ? "1" : "0"
+      fields = %w(
+        user_token xbl_token xbl_xuid xbl_gamertag xbl_modern_gamertag
+        xbl_modern_gamertag_suffix xbl_unique_modern_gamertag xbl_age_group
+        xbl_uhs xbl_privileges user_token_expiry_epoch xbl_token_expiry_epoch
+        sisu_token sisu_uhs sisu_rp sisu_expiry_epoch
+        mp_token mp_uhs mp_rp mp_expiry_epoch
+        realms_token realms_uhs realms_rp realms_expiry_epoch
+        lic_token lic_uhs lic_rp lic_expiry_epoch
+      ).map { |name| optional_string(payload, name).to_s }
+      fields.insert(9, privileges)
+      fields.each do |value|
+        raise "Xbox authentication returned invalid credentials." if
+          value.includes?('\0') || value.bytesize > UInt32::MAX
+      end
+
+      path = bridge_path(root)
+      temporary = "#{path}.tmp"
+      Dir.mkdir_p(File.dirname(path), 0o700)
+      File.open(temporary, "wb", perm: 0o600) do |file|
+        file << "BLGDKXB1"
+        file.write_bytes(fields.size.to_u32, IO::ByteFormat::LittleEndian)
+        fields.each do |value|
+          file.write_bytes(value.bytesize.to_u32, IO::ByteFormat::LittleEndian)
+          file << value
+        end
+      end
       File.rename(temporary, path)
     ensure
       File.delete(temporary) if temporary && File.file?(temporary)
