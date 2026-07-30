@@ -1111,7 +1111,12 @@ module BedrockLinuxGdk
         while @log_lines.size > 500
           @log_lines.shift
         end
-        @log_view.buffer.text = @log_lines.join('\n')
+        buffer = @log_view.buffer
+        buffer.text = @log_lines.join('\n')
+        GLib.idle_add do
+          @log_view.scroll_to_iter(buffer.end_iter, 0.0, false, 0.0, 1.0)
+          false
+        end
       end
 
       private def refresh_account : Nil

@@ -626,6 +626,12 @@ module BedrockLinuxGdk
       environment["PROTON_USE_WOW64"] = "1"
       environment["UMU_FOLDERS_PATH"] = root
       environment["UMU_RUNTIME_UPDATE"] = "0"
+      environment["PROTON_ENABLE_WAYLAND"] = "0"
+      unless environment["WAYLAND_DISPLAY"]?.to_s.strip.empty?
+        environment["WINE_DISABLE_VULKAN_OPWR"] = "1"
+      else
+        environment.delete("WINE_DISABLE_VULKAN_OPWR")
+      end
       environment
     end
 
