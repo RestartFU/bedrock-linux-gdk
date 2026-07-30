@@ -15,6 +15,7 @@ describe BedrockLinuxGdk::AccountState do
 
       account = BedrockLinuxGdk::AccountState.read(paths)
       account.signed_in.should be_true
+      account.user_id.should eq("281474976710655")
       account.gamertag.should eq("Creeper")
     end
   end

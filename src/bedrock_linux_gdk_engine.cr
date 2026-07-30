@@ -33,6 +33,8 @@ module BedrockLinuxGdk
         doctor
       when "setup"
         setup(option(arguments, "--mc"))
+      when "uninstall"
+        uninstall(option(arguments, "--mc"))
       when "play"
         play
       when "login"
@@ -47,7 +49,7 @@ module BedrockLinuxGdk
         puts "bedrock-linux-gdk-engine #{BedrockLinuxGdk.version_string}"
         0
       else
-        error("Usage: bedrock-linux-gdk-engine versions|doctor|setup|play|login|update")
+        error("Usage: bedrock-linux-gdk-engine versions|doctor|setup|uninstall|play|login|update")
         2
       end
     rescue exception
@@ -215,6 +217,18 @@ module BedrockLinuxGdk
       FileUtils.rm_r(target) if Dir.exists?(target)
       File.rename(staging, target)
       game.sub(staging, target)
+    end
+
+    private def uninstall(tag : String?) : Int32
+      raise "Choose a Minecraft version first." unless tag
+      raise "Invalid Minecraft version." unless tag.matches?(/^\d+\.\d+\.\d+(?:\.\d+)?$/)
+
+      target = File.join(shared_root, "games", tag)
+      raise "Minecraft #{tag} is not installed." unless Dir.exists?(target)
+
+      FileUtils.rm_r(target)
+      ok("Minecraft #{tag} uninstalled. Accounts and worlds were preserved.")
+      0
     end
 
     private def find_game(tag : String) : String?
@@ -450,8 +464,8 @@ module BedrockLinuxGdk
 
       source = File.read(path)
       return if source.includes?(
-        "Executable a unix path, launching directly."
-      )
+                  "Executable a unix path, launching directly."
+                )
 
       lines = source.lines(chomp: false)
       message = lines.index do |line|

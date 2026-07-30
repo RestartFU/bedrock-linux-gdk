@@ -10,6 +10,7 @@ require "../version"
 require "../version_entry"
 require "./adw"
 require "./dialogs"
+require "./host_launch"
 require "./pointer_cursors"
 require "./updater"
 
@@ -59,8 +60,8 @@ module BedrockLinuxGdk
 
         @session_model = Gtk::StringList.new(@sessions.map(&.name))
         @session_row = Adw::ComboRow.new
-        @session_row.title = "Session"
-        @session_row.subtitle = "Independent account, worlds and Wine prefix"
+        @session_row.title = "Account"
+        @session_row.subtitle = "Separate credentials, worlds and Wine prefix"
         @session_row.add_css_class("gdk-version")
         @session_row.notify_signal["selected"].connect do |_property|
           session_selected
@@ -72,6 +73,11 @@ module BedrockLinuxGdk
 
         @setup_button = Gtk::Button.new_with_label("Install / Update")
         @setup_button.clicked_signal.connect { setup }
+
+        @uninstall_button = Gtk::Button.new_with_label("Uninstall")
+        @uninstall_button.add_css_class("destructive-action")
+        @uninstall_button.visible = false
+        @uninstall_button.clicked_signal.connect { uninstall }
 
         @cancel_button = Gtk::Button.new_with_label("Cancel")
         @cancel_button.add_css_class("destructive-action")
@@ -97,9 +103,6 @@ module BedrockLinuxGdk
         @account_button.add_css_class("gdk-account")
         @account_button.clicked_signal.connect { show_account_manager }
 
-        @session_entry = Gtk::Entry.new
-        @sessions_output = Gtk::Label.new("")
-
         build_pages
         @updater = Updater.new(@widget, ->(line : String) { append_log(line) })
         @widget.content = build_shell
@@ -110,6 +113,7 @@ module BedrockLinuxGdk
         end
 
         refresh_account
+        normalize_account_profile_names
         refresh_install_state
         set_backend_state
 
@@ -171,9 +175,6 @@ module BedrockLinuxGdk
 
         navigation = Gtk::Box.new(:vertical, 4)
         navigation.append(nav_button("home", "Home", "go-home-symbolic"))
-        navigation.append(
-          nav_button("sessions", "Sessions", "system-users-symbolic")
-        )
         navigation.append(
           nav_button("settings", "Settings", "emblem-system-symbolic")
         )
@@ -241,7 +242,6 @@ module BedrockLinuxGdk
 
       private def build_pages : Nil
         @stack.add_named(build_home, "home")
-        @stack.add_named(build_sessions, "sessions")
         @stack.add_named(build_settings, "settings")
         @stack.add_named(build_diagnostics, "diagnostics")
       end
@@ -272,6 +272,7 @@ module BedrockLinuxGdk
         actions.halign = :end
         actions.append(@spinner)
         actions.append(@cancel_button)
+        actions.append(@uninstall_button)
         actions.append(@setup_button)
         actions.append(@play_button)
 
@@ -346,7 +347,7 @@ module BedrockLinuxGdk
         general = Adw::PreferencesGroup.new
         general.title = "General"
         general.description =
-          "Saved directly to this session's GDK settings file."
+          "Saved directly to this account profile."
 
         betas = switch_row(
           "Show preview versions",
@@ -446,65 +447,6 @@ module BedrockLinuxGdk
           refresh_versions if setting == "show_betas"
         end
         row
-      end
-
-      private def build_sessions : Gtk::Widget
-        title = Gtk::Label.new("Concurrent sessions")
-        title.xalign = 0_f32
-        title.add_css_class("title-1")
-
-        description = Gtk::Label.new(
-          "Each session has its own account, Wine prefix and worlds, while " \
-          "Minecraft downloads are shared. Sessions can run simultaneously."
-        )
-        description.xalign = 0_f32
-        description.wrap = true
-        description.add_css_class("dim-label")
-
-        @session_entry.placeholder_text = "Session name"
-        @session_entry.hexpand = true
-        @session_entry.activate_signal.connect { create_session }
-
-        create = Gtk::Button.new_with_label("Create session")
-        create.add_css_class("suggested-action")
-        create.clicked_signal.connect { create_session }
-
-        form = Gtk::Box.new(:horizontal, 8)
-        form.append(@session_entry)
-        form.append(create)
-
-        @sessions_output.xalign = 0_f32
-        @sessions_output.yalign = 0_f32
-        @sessions_output.wrap = true
-        @sessions_output.selectable = true
-        @sessions_output.add_css_class("gdk-status")
-
-        refresh = Gtk::Button.new_with_label("Refresh")
-        refresh.halign = :start
-        refresh.clicked_signal.connect { refresh_sessions }
-
-        card = Gtk::Box.new(:vertical, 12)
-        card.append(title)
-        card.append(description)
-        card.append(form)
-        card.append(@sessions_output)
-        card.append(refresh)
-        card.add_css_class("gdk-card")
-
-        content = Gtk::Box.new(:vertical, 16)
-        content.margin_top = 24
-        content.margin_bottom = 24
-        content.margin_start = 24
-        content.margin_end = 24
-        content.append(card)
-
-        clamp = Adw::Clamp.new(
-          child: content,
-          maximum_size: 860,
-          tightening_threshold: 760
-        )
-        refresh_sessions
-        clamp
       end
 
       private def build_diagnostics : Gtk::Widget
@@ -613,8 +555,7 @@ module BedrockLinuxGdk
         sync_version_selection
         refresh_account
         refresh_install_state
-        refresh_sessions
-        append_log("Session: #{session.name} · #{@paths.data_dir}")
+        append_log("Account: #{session.name} · #{@paths.data_dir}")
       end
 
       private def refresh_versions : Nil
@@ -707,7 +648,6 @@ module BedrockLinuxGdk
         @launch_jobs[session.key] = job
         append_log("› Launching Minecraft · #{session.name}")
         refresh_install_state
-        refresh_sessions
         environment = session.environment(HostEnvironment.values)
         command = @backend.command(["play"])
 
@@ -722,15 +662,14 @@ module BedrockLinuxGdk
           ->(exit_code : Int32?, error : String?) {
             GLib.idle_add do
               @launch_jobs.delete(session.key)
-              refresh_sessions
               success = exit_code == 0 && error.nil?
               if error
                 append_log("[#{session.name}] error: #{error}")
               elsif success
-                append_log("✓ #{session.name} session ended")
+                append_log("✓ #{session.name} game closed")
               else
                 append_log(
-                  "error: #{session.name} session failed" \
+                  "error: #{session.name} game failed" \
                   "#{exit_code ? " (#{exit_code})" : ""}"
                 )
               end
@@ -756,10 +695,40 @@ module BedrockLinuxGdk
         preflight_install(version, launch_after: false)
       end
 
+      private def uninstall : Nil
+        version = selected_version
+        return unless version
+        if @launch_jobs.any? { |_key, job| job.running }
+          Dialogs.error(
+            @widget,
+            "Minecraft is running",
+            "Close every Minecraft window before uninstalling a version."
+          )
+          return
+        end
+
+        Dialogs.confirm(
+          @widget,
+          "Uninstall Minecraft #{version.tag}?",
+          "Removes this shared game version for every account. Accounts, " \
+          "worlds, settings, and Wine prefixes stay untouched.",
+          "Uninstall"
+        ) do
+          run_operation(
+            "Uninstalling Minecraft",
+            ["uninstall", "--mc", version.tag],
+            ->(_lines : Array(String), success : Bool) {
+              refresh_install_state if success
+            }
+          )
+        end
+      end
+
       private def preflight_install(
         version : VersionEntry,
         launch_after : Bool,
         sign_in_after : Bool = false,
+        pending_sign_in : Bool = false,
       ) : Nil
         run_operation(
           "Checking system requirements",
@@ -774,14 +743,17 @@ module BedrockLinuxGdk
                     mark_version_installed(version.tag)
                     refresh_install_state
                     if sign_in_after
-                      start_sign_in
+                      start_sign_in(pending_profile: pending_sign_in)
                     elsif launch_after
                       play
                     end
+                  elsif pending_sign_in
+                    discard_pending_profile(@current_session)
                   end
                 }
               )
             else
+              discard_pending_profile(@current_session) if pending_sign_in
               Dialogs.error(
                 @widget,
                 "System check failed",
@@ -827,7 +799,7 @@ module BedrockLinuxGdk
         append_log("warn: could not write setup marker: #{error.message}")
       end
 
-      private def start_sign_in : Nil
+      private def start_sign_in(pending_profile : Bool = false) : Nil
         state = AccountState.read(@paths)
         if state.signed_in
           append_log("Microsoft account already linked.")
@@ -847,36 +819,32 @@ module BedrockLinuxGdk
           preflight_install(
             version,
             launch_after: false,
-            sign_in_after: true
+            sign_in_after: true,
+            pending_sign_in: pending_profile
           )
           return
         end
         return if @job.running
 
-        dialog = Adw::Dialog.new(
-          title: "Microsoft sign-in",
-          content_width: 480,
-          content_height: 330
-        )
-        header = Adw::HeaderBar.new
-        header.title_widget = Adw::WindowTitle.new(
-          title: "Microsoft account",
-          subtitle: @current_session.name
+        dialog, content, footer = panel_window(
+          "Microsoft account",
+          "Enter one-time code on Microsoft's official sign-in page.",
+          560
         )
 
         status = Gtk::Label.new("Preparing secure sign-in…")
+        status.xalign = 0_f32
         status.wrap = true
         status.add_css_class("title-3")
 
         code = Gtk::Label.new("")
         code.selectable = true
-        code.add_css_class("title-1")
         code.add_css_class("gdk-auth-code")
 
         hint = Gtk::Label.new(
-          "A browser page will ask for this one-time code. " \
-          "Minecraft stays closed."
+          "Minecraft stays closed until authentication completes."
         )
+        hint.xalign = 0_f32
         hint.wrap = true
         hint.add_css_class("dim-label")
 
@@ -885,28 +853,12 @@ module BedrockLinuxGdk
         open.sensitive = false
         sign_in_url = ""
         open.clicked_signal.connect do
-          unless sign_in_url.empty?
-            spawn do
-              begin
-                result = Process.run(
-                  "xdg-open",
-                  [sign_in_url],
-                  env: HostEnvironment.values,
-                  output: Process::Redirect::Close,
-                  error: Process::Redirect::Close
-                )
-                raise "xdg-open exited with status #{result.exit_code}." unless result.success?
-              rescue error
-                GLib.idle_add do
-                  Dialogs.error(
-                    @widget,
-                    "Could not open browser",
-                    error.message || error.class.name
-                  )
-                  false
-                end
-              end
-            end
+          unless sign_in_url.empty? || HostLaunch.open_uri(sign_in_url)
+            Dialogs.error(
+              dialog,
+              "Could not open browser",
+              "Open #{sign_in_url} in your browser."
+            )
           end
         end
 
@@ -914,24 +866,22 @@ module BedrockLinuxGdk
         spinner.start
         spinner.visible = true
 
-        content = Gtk::Box.new(:vertical, 16)
-        content.margin_top = 28
-        content.margin_bottom = 28
-        content.margin_start = 28
-        content.margin_end = 28
-        content.halign = :fill
         content.append(spinner)
         content.append(status)
         content.append(code)
         content.append(hint)
         content.append(open)
 
-        toolbar = Adw::ToolbarView.new
-        toolbar.add_top_bar(header)
-        toolbar.content = content
-        dialog.child = toolbar
-        dialog.present(@widget)
-        PointerCursors.apply_all
+        cancel = Gtk::Button.new_with_label("Cancel")
+        cancel.add_css_class("gdk-panel-action")
+        cancel.clicked_signal.connect do
+          @job.stop
+          dialog.destroy
+        end
+        footer.append(cancel)
+        dialog.destroy_signal.connect do
+          @job.stop if @job.running
+        end
 
         session = @current_session
         environment = session.environment(HostEnvironment.values)
@@ -965,12 +915,16 @@ module BedrockLinuxGdk
             success = exit_code == 0 && error.nil?
             GLib.idle_add do
               set_busy(false, success ? "Signed in" : "Microsoft sign-in failed")
-              refresh_account
               if success
+                selected_key = finish_account_sign_in(session, pending_profile)
+                reload_sessions(selected_key: selected_key)
                 append_log("✓ Microsoft sign-in complete")
-                dialog.close
+                dialog.destroy
               else
-                dialog.close
+                if pending_profile
+                  discard_pending_profile(session)
+                end
+                dialog.destroy
                 Dialogs.error(
                   @widget,
                   "Microsoft sign-in failed",
@@ -983,19 +937,17 @@ module BedrockLinuxGdk
           },
           environment
         )
+        dialog.present
+        PointerCursors.apply_all
       end
 
       private def show_account_manager : Nil
-        dialog = Adw::Dialog.new(
-          title: "Accounts",
-          content_width: 560,
-          content_height: 520
-        )
-
-        header = Adw::HeaderBar.new
-        header.title_widget = Adw::WindowTitle.new(
-          title: "Accounts",
-          subtitle: "Independent Microsoft account profiles"
+        normalize_account_profile_names
+        dialog, content, footer = panel_window(
+          "Microsoft accounts",
+          "Each account owns one profile. Minecraft downloads stay shared.",
+          680,
+          500
         )
 
         list = Gtk::ListBox.new
@@ -1010,12 +962,27 @@ module BedrockLinuxGdk
           current = session.key == @current_session.key
 
           row = Adw::ActionRow.new
-          row.title = session.name
+          row.title = account.gamertag || session.name
           row.subtitle = if account.signed_in
-                           account.gamertag || "Microsoft account linked"
+                           current ? "Current account" : "Microsoft account"
                          else
-                           "Not signed in"
+                           "Sign-in incomplete"
                          end
+
+          folder = Gtk::Button.new_from_icon_name("folder-open-symbolic")
+          folder.valign = :center
+          folder.tooltip_text = "Open profile folder"
+          folder.add_css_class("flat")
+          folder.clicked_signal.connect do
+            unless HostLaunch.open_path(session.data_dir)
+              Dialogs.error(
+                dialog,
+                "Could not open profile folder",
+                session.data_dir
+              )
+            end
+          end
+          row.add_suffix(folder)
 
           action = Gtk::Button.new_with_label(
             if current && account.signed_in
@@ -1030,7 +997,7 @@ module BedrockLinuxGdk
           action.add_css_class("suggested-action") unless account.signed_in
           action.clicked_signal.connect do
             select_session(session.key)
-            dialog.close
+            dialog.destroy
             start_sign_in unless account.signed_in
           end
           row.add_suffix(action)
@@ -1038,71 +1005,43 @@ module BedrockLinuxGdk
           list.append(row)
         end
 
-        account_name = Gtk::Entry.new
-        account_name.placeholder_text = "New account profile name"
-        account_name.hexpand = true
-
-        add = Gtk::Button.new_with_label("Add & Sign in")
-        add.add_css_class("suggested-action")
-        add.clicked_signal.connect do
-          name = account_name.text.strip
-          unless name.empty?
-            begin
-              previous_version = @settings.string("mc_version")
-              session = @session_store.create(name)
-              unless previous_version.empty?
-                Settings.new(File.join(session.data_dir, "settings.json"))
-                  .set("mc_version", previous_version)
-              end
-              reload_sessions(selected_key: session.key)
-              dialog.close
-              start_sign_in
-            rescue error : ArgumentError | File::Error
-              Dialogs.error(
-                @widget,
-                "Could not add account",
-                error.message || error.class.name
-              )
-            end
-          end
-        end
-
-        add_row = Gtk::Box.new(:horizontal, 8)
-        add_row.append(account_name)
-        add_row.append(add)
-
-        note = Gtk::Label.new(
-          "Each account profile keeps separate credentials, worlds and Wine " \
-          "prefix. Installed Minecraft versions are shared."
-        )
-        note.wrap = true
-        note.xalign = 0_f32
-        note.add_css_class("dim-label")
-
-        content = Gtk::Box.new(:vertical, 16)
-        content.margin_top = 18
-        content.margin_bottom = 18
-        content.margin_start = 18
-        content.margin_end = 18
-        content.append(list)
-        content.append(add_row)
-        content.append(note)
-
         scroller = Gtk::ScrolledWindow.new
         scroller.hscrollbar_policy = :never
         scroller.vscrollbar_policy = :automatic
-        scroller.child = content
+        scroller.vexpand = true
+        scroller.child = list
+        content.append(scroller)
 
-        toolbar = Adw::ToolbarView.new
-        toolbar.add_top_bar(header)
-        toolbar.content = scroller
-        dialog.child = toolbar
-        dialog.present(@widget)
-
-        GLib.idle_add do
-          PointerCursors.apply_all
-          false
+        add = Gtk::Button.new_with_label("Add account")
+        add.add_css_class("suggested-action")
+        add.clicked_signal.connect do
+          begin
+            previous_version = @settings.string("mc_version")
+            session = @session_store.create_pending
+            unless previous_version.empty?
+              Settings.new(File.join(session.data_dir, "settings.json"))
+                .set("mc_version", previous_version)
+            end
+            reload_sessions(selected_key: session.key)
+            dialog.destroy
+            start_sign_in(pending_profile: true)
+          rescue error : ArgumentError | File::Error
+            Dialogs.error(
+              dialog,
+              "Could not add account",
+              error.message || error.class.name
+            )
+          end
         end
+        footer.append(add)
+
+        close = Gtk::Button.new_with_label("Close")
+        close.add_css_class("gdk-panel-action")
+        close.clicked_signal.connect { dialog.destroy }
+        footer.append(close)
+
+        dialog.present
+        PointerCursors.apply_all
       end
 
       private def select_session(key : String) : Nil
@@ -1114,39 +1053,6 @@ module BedrockLinuxGdk
         else
           @session_row.selected = selected.to_u32
         end
-      end
-
-      private def create_session : Nil
-        name = @session_entry.text.strip
-        return if name.empty?
-
-        previous_version = @settings.string("mc_version")
-        session = @session_store.create(name)
-        unless previous_version.empty?
-          Settings.new(File.join(session.data_dir, "settings.json"))
-            .set("mc_version", previous_version)
-        end
-        @session_entry.text = ""
-        reload_sessions(selected_key: session.key)
-        select_page("home")
-        append_log(
-          "Created independent session #{session.name}. Shared game files " \
-          "will be reused on first play."
-        )
-      rescue error : ArgumentError | File::Error
-        Dialogs.error(
-          @widget,
-          "Could not create session",
-          error.message || error.class.name
-        )
-      end
-
-      private def refresh_sessions : Nil
-        lines = @sessions.map do |session|
-          running = @launch_jobs[session.key]?.try(&.running) ? " · running" : ""
-          "#{session.name}#{running}\n#{session.data_dir}"
-        end
-        @sessions_output.text = lines.join("\n\n")
       end
 
       private def reload_sessions(
@@ -1163,6 +1069,131 @@ module BedrockLinuxGdk
         @session_row.selected = selected.to_u32
         @syncing_session = false
         session_selected
+      end
+
+      private def finish_account_sign_in(
+        session : LaunchSession,
+        pending_profile : Bool,
+      ) : String
+        paths = Paths.new(environment: session.environment(ENV.to_h))
+        account = AccountState.read(paths)
+        user_id = account.user_id
+        name = account.gamertag
+        raise "Microsoft account metadata is incomplete." unless user_id && name
+
+        duplicate = @session_store.list.find do |candidate|
+          next false if candidate.key == session.key
+          candidate_paths = Paths.new(
+            environment: candidate.environment(ENV.to_h)
+          )
+          AccountState.read(candidate_paths).user_id == user_id
+        end
+        if pending_profile && duplicate
+          @session_store.delete_pending(session)
+          append_log("Account #{name} already exists; using existing profile.")
+          return duplicate.key
+        end
+
+        @session_store.rename(session, name)
+        session.key
+      rescue error : ArgumentError | File::Error | RuntimeError
+        append_log("warn: could not finalize account profile: #{error.message}")
+        session.key
+      end
+
+      private def discard_pending_profile(session : LaunchSession) : Nil
+        @session_store.delete_pending(session)
+        reload_sessions(selected_key: "default")
+      rescue error : ArgumentError | File::Error
+        append_log("warn: could not remove incomplete account: #{error.message}")
+      end
+
+      private def normalize_account_profile_names : Nil
+        selected_key = @current_session.key
+        changed = false
+        @session_store.list.each do |session|
+          paths = Paths.new(environment: session.environment(ENV.to_h))
+          account = AccountState.read(paths)
+          name = account.gamertag
+          next unless account.signed_in && name
+          next if session.name == name
+
+          @session_store.rename(session, name)
+          changed = true
+        end
+        reload_sessions(selected_key: selected_key) if changed
+      rescue error : ArgumentError | File::Error
+        append_log("warn: could not update account profile name: #{error.message}")
+      end
+
+      private def panel_window(
+        title : String,
+        description : String,
+        width : Int32,
+        height : Int32 = -1,
+      ) : {Gtk::Window, Gtk::Box, Gtk::Box}
+        heading = Gtk::Label.new(title)
+        heading.xalign = 0_f32
+        heading.add_css_class("title-3")
+
+        subtitle = Gtk::Label.new(description)
+        subtitle.xalign = 0_f32
+        subtitle.wrap = true
+        subtitle.add_css_class("dim-label")
+
+        header = Gtk::Box.new(:vertical, 5)
+        header.append(heading)
+        header.append(subtitle)
+        header.add_css_class("gdk-panel-bar")
+        header.add_css_class("gdk-panel-head")
+
+        content = Gtk::Box.new(:vertical, 14)
+        content.margin_top = 20
+        content.margin_bottom = 20
+        content.margin_start = 20
+        content.margin_end = 20
+        content.vexpand = true
+
+        footer = Gtk::Box.new(:horizontal, 10)
+        spacer = Gtk::Box.new(:horizontal, 0)
+        spacer.hexpand = true
+        footer.append(spacer)
+        footer.add_css_class("gdk-panel-bar")
+        footer.add_css_class("gdk-panel-foot")
+
+        root = Gtk::Box.new(:vertical, 0)
+        root.append(header)
+        root.append(content)
+        root.append(footer)
+
+        window = Gtk::Window.new
+        window.title = title
+        window.transient_for = @widget
+        window.application = @widget.application
+        window.destroy_with_parent = true
+        window.modal = true
+        window.decorated = false
+        window.resizable = false
+        window.set_default_size(width, height)
+        window.add_css_class("gdk-panel")
+        window.child = root
+        window.close_request_signal.connect do
+          window.destroy
+          true
+        end
+
+        keys = Gtk::EventControllerKey.new
+        keys.propagation_phase = :capture
+        keys.key_pressed_signal.connect do |keyval, _keycode, _state|
+          if keyval == Gdk::KEY_Escape
+            window.destroy
+            true
+          else
+            false
+          end
+        end
+        window.add_controller(keys)
+        {window, content, footer}
       end
 
       private def run_simple(label : String, args : Array(String)) : Nil
@@ -1236,6 +1267,9 @@ module BedrockLinuxGdk
           !busy && !session_running && @backend.available?
         @setup_button.sensitive =
           !busy && !session_running && @backend.available?
+        @uninstall_button.sensitive =
+          !busy && @launch_jobs.none? { |_key, job| job.running } &&
+            @backend.available?
         @version_row.sensitive = !busy && !@versions.empty?
         @session_row.sensitive = !busy
         @cancel_button.visible = busy
@@ -1293,10 +1327,14 @@ module BedrockLinuxGdk
           !@job.running && !running && @backend.available?
         @setup_button.sensitive =
           !@job.running && !running && @backend.available?
+        @uninstall_button.visible = game_available
+        @uninstall_button.sensitive =
+          !@job.running && @launch_jobs.none? { |_key, job| job.running } &&
+            @backend.available?
         @setup_button.label = if installed
                                 "Verify / Update"
                               elsif game_available
-                                "Prepare session"
+                                "Prepare account"
                               else
                                 "Install / Update"
                               end
@@ -1308,7 +1346,7 @@ module BedrockLinuxGdk
                                elsif installed
                                  "#{version} installed"
                                elsif game_available
-                                 "#{version} shared · session needs preparation"
+                                 "#{version} shared · account needs preparation"
                                else
                                  "#{version} will install on first launch"
                                end

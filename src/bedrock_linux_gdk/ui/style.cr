@@ -187,6 +187,42 @@ module BedrockLinuxGdk
         border-radius: 12px;
       }
 
+      .gdk-panel {
+        background: #0b0b0d;
+        border-radius: 14px;
+        border: 1px solid alpha(#ffffff, 0.07);
+        box-shadow: 0 24px 64px alpha(#000000, 0.65);
+      }
+
+      .gdk-panel-bar {
+        padding: 13px 16px;
+      }
+
+      .gdk-panel-head {
+        border-bottom: 1px solid alpha(#ffffff, 0.06);
+      }
+
+      .gdk-panel-foot {
+        border-top: 1px solid alpha(#ffffff, 0.06);
+      }
+
+      .gdk-panel-action {
+        background: alpha(#ffffff, 0.10);
+        border: 1px solid alpha(#ffffff, 0.08);
+        border-radius: 9px;
+        padding: 5px 14px;
+      }
+
+      .gdk-panel-action:hover {
+        background: alpha(#ffffff, 0.16);
+      }
+
+      .gdk-auth-code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 1.35em;
+        font-weight: 700;
+      }
+
       scrollbar, scrollbar trough {
         background: none;
         border: none;

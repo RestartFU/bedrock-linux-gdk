@@ -50,10 +50,44 @@ describe BedrockLinuxGdk::SessionStore do
         home
       )
       store.create("Player Two")
-      expect_raises(ArgumentError, "Session already exists.") do
+      expect_raises(ArgumentError, "Account profile already exists.") do
         store.create("player two")
       end
       store.list.map(&.key).should contain("player-two")
+    end
+  end
+
+  it "creates and names account profiles after sign-in" do
+    with_temp_dir("bedrock-sessions") do |home|
+      store = BedrockLinuxGdk::SessionStore.new(
+        File.join(home, "bedrock"),
+        home
+      )
+      pending = store.create_pending
+      pending.key.should start_with("account-")
+      pending.name.should eq("Signing in…")
+
+      store.rename(pending, "Creeper")
+      account = store.list.find(&.key.==(pending.key)).not_nil!
+      account.name.should eq("Creeper")
+    end
+  end
+
+  it "removes only temporary account profiles" do
+    with_temp_dir("bedrock-sessions") do |home|
+      store = BedrockLinuxGdk::SessionStore.new(
+        File.join(home, "bedrock"),
+        home
+      )
+      pending = store.create_pending
+      store.delete_pending(pending)
+      Dir.exists?(pending.data_dir).should be_false
+
+      regular = store.create("Creeper")
+      expect_raises(ArgumentError, "Invalid account profile key.") do
+        store.delete_pending(regular)
+      end
+      Dir.exists?(regular.data_dir).should be_true
     end
   end
 end
