@@ -11,7 +11,6 @@ module BedrockLinuxGdk
       values = base.dup
       if @isolated
         values["BEDROCK_LINUX_GDK_HOME"] = @data_dir
-        values["BOL_HOME"] = @data_dir
       end
       values
     end

@@ -17,6 +17,9 @@ cp -a "$arch_dir"/ossl-modules/*.so "$out/lib/ossl-modules/" 2>/dev/null || true
 install -Dm755 \
   "$stage/usr/bin/bedrock-linux-gdk" \
   "$out/bin/bedrock-linux-gdk"
+install -Dm755 \
+  "$stage/usr/bin/bedrock-linux-gdk-engine" \
+  "$out/bin/bedrock-linux-gdk-engine"
 
 mkdir -p "$out/lib/gdk-pixbuf-2.0/loaders"
 cp -a "$pixbuf_loaders"/*.so "$out/lib/gdk-pixbuf-2.0/loaders/"
@@ -29,6 +32,7 @@ query_loaders=$(command -v gdk-pixbuf-query-loaders \
 
 mapfile -t roots < <(printf '%s\n' \
   "$out/bin/bedrock-linux-gdk" \
+  "$out/bin/bedrock-linux-gdk-engine" \
   "$out/lib/ossl-modules"/*.so \
   "$out/lib/gdk-pixbuf-2.0/loaders"/*.so \
   "$arch_dir"/libnss_files.so.2 \
@@ -125,12 +129,6 @@ cp /etc/ssl/openssl.cnf "$out/etc/ssl/openssl.cnf"
 
 mkdir -p "$out/share/applications"
 cp -a "$stage/usr/share/applications/." "$out/share/applications/"
-
-if [ -d "$stage/usr/share/bedrock-linux-gdk/python" ]; then
-  mkdir -p "$out/share/bedrock-linux-gdk"
-  cp -a "$stage/usr/share/bedrock-linux-gdk/python" \
-    "$out/share/bedrock-linux-gdk/"
-fi
 
 install -Dm755 "$launcher" "$out/bedrock-linux-gdk.sh"
 

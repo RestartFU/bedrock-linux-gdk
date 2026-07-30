@@ -28,10 +28,6 @@ module BedrockLinuxGdk
         return new(Kind::Native, native)
       end
 
-      if native = find_desktop_runtime(environment)
-        return new(Kind::Native, native)
-      end
-
       new(Kind::Missing)
     rescue File::Error
       new(Kind::Missing)
@@ -44,7 +40,7 @@ module BedrockLinuxGdk
     def label : String
       case @kind
       when .native?
-        "Native backend"
+        "Bundled Crystal engine"
       else
         "Not installed"
       end
@@ -53,10 +49,26 @@ module BedrockLinuxGdk
     def command(arguments : Array(String)) : Array(String)
       case @kind
       when .native?
-        [@executable || NATIVE_COMMAND] + arguments
+        executable = @executable || NATIVE_COMMAND
+        bundled_command(executable) + arguments
       else
-        raise "GDK runtime is not installed"
+        raise "Bedrock Linux GDK engine is not installed"
       end
+    end
+
+    private def bundled_command(executable : String) : Array(String)
+      return [executable] unless executable.starts_with?('/')
+
+      root = File.dirname(File.dirname(executable))
+      loader = File.join(root, "lib", "ld-linux-x86-64.so.2")
+      libraries = File.join(root, "lib")
+      if File::Info.executable?(loader) && Dir.exists?(libraries)
+        [loader, "--library-path", libraries, executable]
+      else
+        [executable]
+      end
+    rescue File::Error
+      [executable]
     end
 
     def self.find_executable(
@@ -72,62 +84,6 @@ module BedrockLinuxGdk
       rescue File::Error
       end
       nil
-    end
-
-    def self.find_desktop_runtime(
-      environment : Hash(String, String),
-    ) : String?
-      home = environment["HOME"]? || Path.home.to_s
-      data_home = environment["XDG_DATA_HOME"]? ||
-                  File.join(home, ".local", "share")
-      directories = [
-        File.join(File.expand_path(data_home, home), "applications"),
-        "/usr/local/share/applications",
-        "/usr/share/applications",
-      ]
-
-      directories.each do |directory|
-        next unless Dir.exists?(directory)
-
-        Dir.each_child(directory) do |entry|
-          next unless entry.ends_with?(".desktop")
-
-          contents = File.read(File.join(directory, entry))
-          name = contents.each_line.find(&.starts_with?("Name="))
-          next unless name
-
-          searchable = name.downcase
-          next unless searchable.includes?("bedrock") &&
-                      searchable.includes?("linux")
-
-          exec = contents.each_line.find(&.starts_with?("Exec="))
-          next unless exec
-          next unless exec.split(/\s+/).includes?("gui")
-
-          command = desktop_command(exec.lchop("Exec=").strip)
-          next unless command
-
-          if command.starts_with?('/')
-            return command if File::Info.executable?(command)
-          elsif executable = find_executable(command, environment["PATH"]?)
-            return executable
-          end
-        rescue File::Error
-        end
-      end
-      nil
-    end
-
-    private def self.desktop_command(exec : String) : String?
-      return if exec.empty?
-
-      if exec.starts_with?('"')
-        closing = exec.index('"', 1)
-        return unless closing
-        exec.byte_slice(1, closing - 1)
-      else
-        exec.split(/\s+/, 2).first?
-      end
     end
   end
 end

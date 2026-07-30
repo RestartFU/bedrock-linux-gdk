@@ -33,17 +33,17 @@ module BedrockLinuxGdk
         box-shadow: none;
       }
 
-      .bol-sidebar {
+      .gdk-sidebar {
         background: #050506;
         border-right: 1px solid #242428;
         padding: 12px;
       }
 
-      .bol-brand {
+      .gdk-brand {
         padding: 10px 8px 18px 8px;
       }
 
-      .bol-nav {
+      .gdk-nav {
         background: transparent;
         border: none;
         box-shadow: none;
@@ -51,54 +51,54 @@ module BedrockLinuxGdk
         padding: 9px 11px;
       }
 
-      .bol-nav:hover {
+      .gdk-nav:hover {
         background: alpha(#ffffff, 0.055);
       }
 
-      .bol-nav.selected {
+      .gdk-nav.selected {
         background: alpha(#ffffff, 0.09);
       }
 
-      .bol-content {
+      .gdk-content {
         background: #08080a;
       }
 
-      .bol-card {
+      .gdk-card {
         background: #101013;
         border: 1px solid #242428;
         border-radius: 16px;
         padding: 20px;
       }
 
-      .bol-hero {
+      .gdk-hero {
         background:
           linear-gradient(120deg, alpha(#22c55e, 0.10), transparent 46%),
           #101013;
       }
 
-      .bol-version {
+      .gdk-version {
         background: alpha(#ffffff, 0.045);
         border: 1px solid alpha(#ffffff, 0.065);
       }
 
-      .bol-choices {
+      .gdk-choices {
         background: transparent;
         border: 1px solid alpha(#ffffff, 0.065);
         border-radius: 11px;
       }
 
-      .bol-choices > row {
+      .gdk-choices > row {
         background: alpha(#ffffff, 0.045);
         border: none;
         border-radius: 0;
       }
 
-      .bol-choices > row:first-child {
+      .gdk-choices > row:first-child {
         border-radius: 10px 10px 0 0;
         border-bottom: 1px solid alpha(#ffffff, 0.065);
       }
 
-      .bol-choices > row:last-child {
+      .gdk-choices > row:last-child {
         border-radius: 0 0 10px 10px;
       }
 
@@ -136,34 +136,34 @@ module BedrockLinuxGdk
         border-color: transparent;
       }
 
-      .bol-account {
+      .gdk-account {
         border-radius: 9999px;
         padding-left: 13px;
         padding-right: 13px;
       }
 
-      .bol-log, .bol-log text {
+      .gdk-log, .gdk-log text {
         background: #050506;
         color: #b8b8bf;
         font-family: "JetBrains Mono", "Monospace", monospace;
         font-size: 0.90em;
       }
 
-      .bol-log {
+      .gdk-log {
         border: 1px solid #242428;
         border-radius: 12px;
         padding: 10px;
       }
 
-      .bol-status {
+      .gdk-status {
         color: alpha(#ffffff, 0.58);
       }
 
-      .bol-success {
+      .gdk-success {
         color: #4ade80;
       }
 
-      .bol-warning {
+      .gdk-warning {
         color: #fbbf24;
       }
 

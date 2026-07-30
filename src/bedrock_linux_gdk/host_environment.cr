@@ -50,23 +50,23 @@ module BedrockLinuxGdk
           environment.delete(key)
         end
       end
-      add_bundled_python(environment, executable)
+      add_system_umu(environment)
       environment
     end
 
-    private def add_bundled_python(
-      environment : Hash(String, String),
-      executable : String?,
-    ) : Nil
-      return unless executable
+    private def add_system_umu(environment : Hash(String, String)) : Nil
+      return if environment.has_key?("BEDROCK_LINUX_GDK_UMU")
+      return unless path = environment["PATH"]?
 
-      root = File.dirname(File.dirname(executable))
-      python = File.join(root, "share", "bedrock-linux-gdk", "python")
-      return unless Dir.exists?(python)
-
-      existing = environment["PYTHONPATH"]?
-      environment["PYTHONPATH"] =
-        existing && !existing.empty? ? "#{python}:#{existing}" : python
+      path.split(':').each do |directory|
+        next if directory.empty?
+        candidate = File.join(directory, "umu-run")
+        if File::Info.executable?(candidate)
+          environment["BEDROCK_LINUX_GDK_UMU"] = candidate
+          return
+        end
+      rescue File::Error
+      end
     end
   end
 end

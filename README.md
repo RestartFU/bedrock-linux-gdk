@@ -11,10 +11,10 @@ Built with the same application stack as
 - custom modern-black GTK CSS
 - Shards
 
-Runtime work uses a small command protocol (`versions`, `setup`, `play`,
-`login`, `doctor`, `repair`, `update`). Launcher UI and runtime state remain
-separate, making long-running game processes non-blocking and independently
-testable.
+Bundled first-party Crystal engine uses a small command protocol (`versions`,
+`setup`, `play`, `login`, `doctor`, `repair`, `update`). Launcher UI and engine
+state remain separate, making long-running game processes non-blocking and
+independently testable.
 
 ## Features
 
@@ -26,10 +26,10 @@ testable.
 - Independent concurrent sessions with separate accounts, prefixes, worlds
   and game files
 - Fail-fast Play pipeline: sign-in and system checks run before downloads
-- Compatible GDK runtime settings editor
+- First-party Crystal install, login, update and launch engine
 - System, network and Wine-prefix diagnostics
 - Live activity output with cancellation
-- Native runtime discovery
+- Automatic official UMU and GDK-Proton setup
 - Original voxel grass-block app icon
 
 Concurrent sessions intentionally use separate game data roots. Independent
@@ -38,12 +38,9 @@ collisions during simultaneous play.
 
 ## Requirements
 
-- Crystal 1.19 or newer
-- Shards
-- GTK 4.10 or newer
-- libadwaita 1.4 or newer
-- `gobject-introspection`
-- A compatible GDK runtime
+- x86_64 Linux with Vulkan support
+- `curl`, `python3`, `tar` and `unzip`
+- Docker only when building from source
 
 ## Build
 
@@ -111,15 +108,15 @@ an annotated tag, runs Docker tests/build, checksums the bundle and publishes
 a normal GitHub release. Direct `vX.Y.Z` tag pushes remain supported when the
 tag already matches the source version.
 
-## Runtime selection
+## Engine selection
 
 Discovery order:
 
-1. `BEDROCK_LINUX_GDK_BACKEND=/absolute/path/to/runtime`
-2. Native `bedrock-linux-gdk-engine` from `PATH`
-3. Compatible native runtime registered through a Linux desktop entry
+1. `BEDROCK_LINUX_GDK_BACKEND=/absolute/path/to/engine` for development
+2. Bundled `bedrock-linux-gdk-engine`
 
-Runtime state stays in launcher-owned session storage for each command.
+No desktop-entry discovery or third-party launcher fallback exists. Engine
+state stays in launcher-owned session storage for each command.
 
 ## Data compatibility
 
@@ -129,9 +126,9 @@ are preserved. All launcher-managed state lives under `bedrock-linux-gdk`:
 - Native: `${XDG_DATA_HOME:-~/.local/share}/bedrock-linux-gdk`
 - Extra sessions: `<data root>/sessions/<session>`
 
-Every runtime command receives its session root through
-`BEDROCK_LINUX_GDK_HOME`. Existing runtime state outside `bedrock-linux-gdk`
-is not reused, modified or locked.
+Every engine command receives its session root through
+`BEDROCK_LINUX_GDK_HOME`. Existing state outside `bedrock-linux-gdk` is not
+reused, modified or locked.
 
 ## License
 

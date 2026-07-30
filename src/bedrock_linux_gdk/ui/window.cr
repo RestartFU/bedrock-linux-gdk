@@ -52,7 +52,7 @@ module BedrockLinuxGdk
         @version_row = Adw::ComboRow.new
         @version_row.title = "Minecraft version"
         @version_row.subtitle = "Stable releases"
-        @version_row.add_css_class("bol-version")
+        @version_row.add_css_class("gdk-version")
         @version_row.notify_signal["selected"].connect do |_property|
           version_selected
         end
@@ -61,7 +61,7 @@ module BedrockLinuxGdk
         @session_row = Adw::ComboRow.new
         @session_row.title = "Session"
         @session_row.subtitle = "Independent account, worlds and game files"
-        @session_row.add_css_class("bol-version")
+        @session_row.add_css_class("gdk-version")
         @session_row.notify_signal["selected"].connect do |_property|
           session_selected
         end
@@ -80,7 +80,7 @@ module BedrockLinuxGdk
 
         @status_label = Gtk::Label.new("")
         @status_label.xalign = 0_f32
-        @status_label.add_css_class("bol-status")
+        @status_label.add_css_class("gdk-status")
 
         @spinner = Gtk::Spinner.new
         @spinner.visible = false
@@ -90,11 +90,11 @@ module BedrockLinuxGdk
         @log_view.cursor_visible = false
         @log_view.monospace = true
         @log_view.wrap_mode = :word_char
-        @log_view.add_css_class("bol-log")
+        @log_view.add_css_class("gdk-log")
 
         @account_button = Gtk::Button.new_with_label("Sign in")
         @account_button.add_css_class("flat")
-        @account_button.add_css_class("bol-account")
+        @account_button.add_css_class("gdk-account")
         @account_button.clicked_signal.connect { show_account_manager }
 
         @session_entry = Gtk::Entry.new
@@ -138,7 +138,7 @@ module BedrockLinuxGdk
         toolbar = Adw::ToolbarView.new
         toolbar.add_top_bar(header)
         toolbar.content = @stack
-        toolbar.add_css_class("bol-content")
+        toolbar.add_css_class("gdk-content")
 
         split = Gtk::Paned.new(:horizontal)
         split.start_child = sidebar
@@ -167,7 +167,7 @@ module BedrockLinuxGdk
         brand = Gtk::Box.new(:horizontal, 10)
         brand.append(brand_icon)
         brand.append(brand_text)
-        brand.add_css_class("bol-brand")
+        brand.add_css_class("gdk-brand")
 
         navigation = Gtk::Box.new(:vertical, 4)
         navigation.append(nav_button("home", "Home", "go-home-symbolic"))
@@ -202,7 +202,7 @@ module BedrockLinuxGdk
         sidebar.append(navigation)
         sidebar.append(spacer)
         sidebar.append(backend_label)
-        sidebar.add_css_class("bol-sidebar")
+        sidebar.add_css_class("gdk-sidebar")
         select_page("home")
         sidebar
       end
@@ -222,7 +222,7 @@ module BedrockLinuxGdk
         row.append(text)
         button.child = row
         button.add_css_class("flat")
-        button.add_css_class("bol-nav")
+        button.add_css_class("gdk-nav")
         button.clicked_signal.connect { select_page(page) }
         @nav_buttons[page] = button
         button
@@ -283,7 +283,7 @@ module BedrockLinuxGdk
 
         choices = Gtk::ListBox.new
         choices.selection_mode = :none
-        choices.add_css_class("bol-choices")
+        choices.add_css_class("gdk-choices")
         choices.append(@session_row)
         choices.append(@version_row)
         @session_row.model = @session_model
@@ -293,8 +293,8 @@ module BedrockLinuxGdk
         hero.append(hero_head)
         hero.append(choices)
         hero.append(footer)
-        hero.add_css_class("bol-card")
-        hero.add_css_class("bol-hero")
+        hero.add_css_class("gdk-card")
+        hero.add_css_class("gdk-hero")
 
         log_title = Gtk::Label.new("ACTIVITY")
         log_title.xalign = 0_f32
@@ -478,7 +478,7 @@ module BedrockLinuxGdk
         @sessions_output.yalign = 0_f32
         @sessions_output.wrap = true
         @sessions_output.selectable = true
-        @sessions_output.add_css_class("bol-status")
+        @sessions_output.add_css_class("gdk-status")
 
         refresh = Gtk::Button.new_with_label("Refresh")
         refresh.halign = :start
@@ -490,7 +490,7 @@ module BedrockLinuxGdk
         card.append(form)
         card.append(@sessions_output)
         card.append(refresh)
-        card.add_css_class("bol-card")
+        card.add_css_class("gdk-card")
 
         content = Gtk::Box.new(:vertical, 16)
         content.margin_top = 24
@@ -516,7 +516,7 @@ module BedrockLinuxGdk
         state.title = "Runtime"
 
         backend = Adw::ActionRow.new
-        backend.title = "GDK runtime"
+        backend.title = "Game engine"
         backend.subtitle = @backend.label
         state.add(backend)
 
@@ -667,8 +667,8 @@ module BedrockLinuxGdk
         unless @backend.available?
           Dialogs.error(
             @widget,
-            "GDK runtime is not installed",
-            "Install a compatible GDK runtime, then reopen this client."
+            "Game engine is not installed",
+            "Reinstall Bedrock Linux GDK, then reopen this client."
           )
           return
         end
@@ -1043,8 +1043,8 @@ module BedrockLinuxGdk
         unless @backend.available?
           Dialogs.error(
             @widget,
-            "GDK runtime is not installed",
-            "Install a compatible GDK runtime, then reopen this client."
+            "Game engine is not installed",
+            "Reinstall Bedrock Linux GDK, then reopen this client."
           )
           return
         end
@@ -1122,9 +1122,9 @@ module BedrockLinuxGdk
                                   "Sign in"
                                 end
         if account.signed_in
-          @account_button.add_css_class("bol-success")
+          @account_button.add_css_class("gdk-success")
         else
-          @account_button.remove_css_class("bol-success")
+          @account_button.remove_css_class("gdk-success")
         end
       end
 
@@ -1159,8 +1159,8 @@ module BedrockLinuxGdk
           append_log("Backend: #{@backend.label}")
           append_log("Data: #{@paths.data_dir}")
         else
-          @status_label.text = "GDK runtime not found"
-          append_log("error: GDK runtime not found")
+          @status_label.text = "Game engine not found"
+          append_log("error: game engine not found")
         end
       end
     end

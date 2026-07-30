@@ -7,6 +7,8 @@ authors:
 targets:
   bedrock-linux-gdk:
     main: src/bedrock_linux_gdk.cr
+  bedrock-linux-gdk-engine:
+    main: src/bedrock_linux_gdk_engine.cr
 
 dependencies:
   gtk4:

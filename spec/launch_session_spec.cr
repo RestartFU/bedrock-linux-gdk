@@ -15,8 +15,6 @@ describe BedrockLinuxGdk::SessionStore do
         {} of String => String
       )["BEDROCK_LINUX_GDK_HOME"]
         .should eq(sessions.first.data_dir)
-      sessions.first.environment({} of String => String)["BOL_HOME"]
-        .should eq(sessions.first.data_dir)
     end
   end
 
@@ -33,8 +31,6 @@ describe BedrockLinuxGdk::SessionStore do
       created.environment(
         {} of String => String
       )["BEDROCK_LINUX_GDK_HOME"]
-        .should eq(created.data_dir)
-      created.environment({} of String => String)["BOL_HOME"]
         .should eq(created.data_dir)
     end
   end

@@ -26,24 +26,26 @@ describe BedrockLinuxGdk::Backend do
     end
   end
 
-  it "discovers a compatible native runtime from its desktop entry" do
-    with_temp_dir("bedrock-runtime") do |home|
-      executable = File.join(home, "runtime")
-      applications = File.join(home, ".local", "share", "applications")
-      Dir.mkdir_p(applications)
-      File.write(executable, "#!/bin/sh\n")
-      File.chmod(executable, 0o755)
-      File.write(
-        File.join(applications, "runtime.desktop"),
-        "[Desktop Entry]\n" \
-        "Name=Bedrock Linux Runtime\n" \
-        "Exec=#{executable} gui\n"
-      )
+  it "runs the bundled engine through its shipped loader" do
+    with_temp_dir("bedrock-bundle") do |root|
+      executable = File.join(root, "bin", "bedrock-linux-gdk-engine")
+      loader = File.join(root, "lib", "ld-linux-x86-64.so.2")
+      Dir.mkdir_p(File.dirname(executable))
+      Dir.mkdir_p(File.dirname(loader))
+      File.write(executable, "#!/bin/sh\n", perm: 0o755)
+      File.write(loader, "#!/bin/sh\n", perm: 0o755)
 
-      BedrockLinuxGdk::Backend.find_desktop_runtime({
-        "HOME" => home,
-        "PATH" => home,
-      }).should eq(executable)
+      backend = BedrockLinuxGdk::Backend.new(
+        BedrockLinuxGdk::Backend::Kind::Native,
+        executable
+      )
+      backend.command(["doctor"]).should eq([
+        loader,
+        "--library-path",
+        File.join(root, "lib"),
+        executable,
+        "doctor",
+      ])
     end
   end
 end

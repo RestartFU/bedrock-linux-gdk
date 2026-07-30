@@ -37,6 +37,9 @@ RUN test "$PROFILE" = default || test "$PROFILE" = nightly \
  && BEDROCK_BUILD_PROFILE="$PROFILE" BEDROCK_BUILD_COMMIT="$COMMIT" \
       crystal build src/bedrock_linux_gdk.cr \
         --release --no-debug -o /crystal-build/bedrock-linux-gdk \
+ && BEDROCK_BUILD_PROFILE="$PROFILE" BEDROCK_BUILD_COMMIT="$COMMIT" \
+      crystal build src/bedrock_linux_gdk_engine.cr \
+        --release --no-debug -o /crystal-build/bedrock-linux-gdk-engine \
  && /crystal-build/bedrock-linux-gdk --version
 
 FROM crystal AS test
@@ -68,7 +71,6 @@ RUN apt-get update \
       librsvg2-common \
       openssl \
       patchelf \
-      python3-pip \
       shared-mime-info \
       xkb-data \
  && rm -rf /var/lib/apt/lists/*
@@ -82,13 +84,9 @@ COPY data ./data
 COPY scripts/bundle.sh /usr/local/bin/bundle.sh
 COPY scripts/bedrock-linux-gdk.sh /usr/local/share/bedrock-linux-gdk.sh
 COPY --from=crystal /crystal-build/bedrock-linux-gdk /stage/usr/bin/bedrock-linux-gdk
+COPY --from=crystal /crystal-build/bedrock-linux-gdk-engine /stage/usr/bin/bedrock-linux-gdk-engine
 
 RUN set -eux; \
-    python3 -m pip install \
-      --break-system-packages \
-      --no-cache-dir \
-      --target /stage/usr/share/bedrock-linux-gdk/python \
-      cryptography==43.0.3; \
     test "$PROFILE" = default || test "$PROFILE" = nightly; \
     if [ "$PROFILE" = nightly ]; then \
       app_id=com.restartfu.BedrockLinuxGdk.Nightly; \
