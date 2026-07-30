@@ -1,0 +1,127 @@
+diff --git a/dlls/xgameruntime/GDKComponent/System/User/XUser.h b/dlls/xgameruntime/GDKComponent/System/User/XUser.h
+--- a/dlls/xgameruntime/GDKComponent/System/User/XUser.h
++++ b/dlls/xgameruntime/GDKComponent/System/User/XUser.h
+@@ -45,6 +45,9 @@ struct x_user
+     HSTRING oauth_token;
+     HSTRING user_token;
+     HSTRING xsts_token;
++    HSTRING achievements_token;
++    UINT64 achievements_uhs;
++    time_t achievements_expiry;
+     CHAR gamertag[128];
+     CHAR modern_gamertag[128];
+     CHAR modern_gamertag_suffix[32];
+diff --git a/dlls/xgameruntime/GDKComponent/System/User/XUser.c b/dlls/xgameruntime/GDKComponent/System/User/XUser.c
+--- a/dlls/xgameruntime/GDKComponent/System/User/XUser.c
++++ b/dlls/xgameruntime/GDKComponent/System/User/XUser.c
+@@ -159,6 +159,9 @@ enum bridge_field_index
+     BRIDGE_XBL_PRIVILEGES,
+     BRIDGE_USER_EXPIRY,
+     BRIDGE_XBL_EXPIRY,
++    BRIDGE_ACHIEVEMENTS_TOKEN,
++    BRIDGE_ACHIEVEMENTS_UHS,
++    BRIDGE_ACHIEVEMENTS_EXPIRY,
+     BRIDGE_SISU_TOKEN,
+     BRIDGE_SISU_UHS,
+     BRIDGE_SISU_RP,
+@@ -248,6 +251,7 @@ static void clear_bridge_user( struct x_user *user )
+ {
+     WindowsDeleteString( user->user_token );
+     WindowsDeleteString( user->xsts_token );
++    WindowsDeleteString( user->achievements_token );
+     WindowsDeleteString( user->xbl_privileges );
+     WindowsDeleteString( user->sisu_token );
+     WindowsDeleteString( user->mp_token );
+@@ -255,6 +259,7 @@ static void clear_bridge_user( struct x_user *user )
+     WindowsDeleteString( user->lic_token );
+     user->user_token = NULL;
+     user->xsts_token = NULL;
++    user->achievements_token = NULL;
+     user->xbl_privileges = NULL;
+     user->sisu_token = NULL;
+     user->mp_token = NULL;
+@@ -388,6 +393,19 @@ static HRESULT LoadBridgeUser( struct x_user *user )
+         hr = E_FAIL;
+         goto done;
+     }
++    if (FAILED( hr = bridge_hstring( &fields[BRIDGE_ACHIEVEMENTS_TOKEN],
++                                      &user->achievements_token ) ) ||
++        FAILED( hr = bridge_u64( &fields[BRIDGE_ACHIEVEMENTS_UHS],
++                                 &user->achievements_uhs ) ) ||
++        FAILED( hr = bridge_u64( &fields[BRIDGE_ACHIEVEMENTS_EXPIRY],
++                                 &value ) ))
++        goto done;
++    user->achievements_expiry = (time_t)value;
++    if (user->achievements_expiry <= time( NULL ) + 30)
++    {
++        hr = E_FAIL;
++        goto done;
++    }
+ 
+ #define LOAD_AUDIENCE(name, upper) \
+     do \
+@@ -786,6 +804,7 @@ static ULONG WINAPI x_user_Release( IXUserImpl *iface )
+         WindowsDeleteString( impl->oauth_token );
+         WindowsDeleteString( impl->user_token );
+         WindowsDeleteString( impl->xsts_token );
++        if (impl->achievements_token) WindowsDeleteString( impl->achievements_token );
+         if (impl->xbl_privileges) WindowsDeleteString( impl->xbl_privileges );
+         if (impl->sisu_token) WindowsDeleteString( impl->sisu_token );
+         if (impl->mp_token) WindowsDeleteString( impl->mp_token );
+@@ -1379,6 +1398,7 @@ static HRESULT CALLBACK XUserGetTokenAndSignatureProvider( XAsyncOp operation, c
+             LPCSTR rp = "http://xboxlive.com";
+             UINT64 token_uhs;
+             time_t now;
++            BOOLEAN achievements_request;
+             BOOLEAN force_refresh = !!(context->options &
+                                         XUserGetTokenAndSignatureOptions_ForceRefresh);
+ 
+@@ -1393,6 +1413,8 @@ static HRESULT CALLBACK XUserGetTokenAndSignatureProvider( XAsyncOp operation, c
+              * Marketplace, PlayFab and external-server joins each need a
+              * different XSTS audience). */
+             rp = resolve_relying_party_for_url( url );
++            achievements_request =
++                url_host_matches( url, "achievements.xboxlive.com", FALSE );
+ 
+             TRACE( "requesting token: method=%s, rp=%s, headers=%llu, body=%llu bytes\n",
+                    context->method, rp, (unsigned long long)context->count,
+@@ -1415,14 +1437,29 @@ static HRESULT CALLBACK XUserGetTokenAndSignatureProvider( XAsyncOp operation, c
+ 
+             if (user_impl->oauth_token)
+             {
++                now = time( NULL );
++                if (!force_refresh && achievements_request &&
++                    user_impl->achievements_token &&
++                    user_impl->achievements_expiry > now + 30)
++                {
++                    HSTRING dup = NULL;
++                    if (SUCCEEDED( WindowsDuplicateString(
++                            user_impl->achievements_token, &dup ) ))
++                    {
++                        xsts_token = dup;
++                        token_uhs = user_impl->achievements_uhs;
++                        dowork_hr = S_OK;
++                        TRACE( "reusing launcher Xbox Achievements token\n" );
++                    }
++                }
+                 /* Preauth: when MC asks for the http://xboxlive.com RP
+                  * (Friends/Social), serve the xbl_token the launcher
+                  * pre-fetched and stashed into impl->xsts_token — that
+                  * token IS a SISU AuthorizationToken for that exact RP
+                  * with the matching uhs in impl->local_id.value. Hitting
+                  * SISU from Wine would just TCP-RST against GnuTLS. */
+-                now = time( NULL );
+-                if (!force_refresh && user_impl->xsts_token &&
++                if (!force_refresh && FAILED( dowork_hr ) &&
++                    user_impl->xsts_token &&
+                     user_impl->xsts_token_expiry > now + 30 &&
+                     !strcmp( rp, "http://xboxlive.com" ))
+                 {
+@@ -2192,6 +2229,7 @@ static ULONG WINAPI x_user_gt_Release( IXUserGamertag *iface )
+         WindowsDeleteString( impl->oauth_token );
+         WindowsDeleteString( impl->user_token );
+         WindowsDeleteString( impl->xsts_token );
++        if (impl->achievements_token) WindowsDeleteString( impl->achievements_token );
+         if (impl->xbl_privileges) WindowsDeleteString( impl->xbl_privileges );
+         if (impl->sisu_token) WindowsDeleteString( impl->sisu_token );
+         if (impl->mp_token) WindowsDeleteString( impl->mp_token );

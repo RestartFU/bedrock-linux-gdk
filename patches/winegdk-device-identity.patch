@@ -1,0 +1,218 @@
+--- a/dlls/xgameruntime/GDKComponent/System/User/DeviceAuth.h
++++ b/dlls/xgameruntime/GDKComponent/System/User/DeviceAuth.h
+@@ -13,6 +13,12 @@
+ /* Initialize device auth - generate key pair and get device token */
+ HRESULT DeviceAuth_Initialize( LPCSTR msa_access_token );
+ 
++/* Initialize device auth from launcher-owned credentials. */
++HRESULT DeviceAuth_InitializePreauthenticated(
++    const BYTE *device_token, UINT32 device_token_len,
++    const BYTE *device_id, UINT32 device_id_len,
++    const BYTE *private_blob_b64, UINT32 private_blob_b64_len );
++
+ /* Get the device token (JWT string) */
+ HRESULT DeviceAuth_GetDeviceToken( HSTRING *token );
+ 
+--- a/dlls/xgameruntime/GDKComponent/System/User/DeviceAuth.c
++++ b/dlls/xgameruntime/GDKComponent/System/User/DeviceAuth.c
+@@ -34,6 +34,149 @@
+ static BOOLEAN g_initialized;
+ static CHAR g_device_id[40]; /* {UUID} */
+ 
++static HRESULT DeviceAuth_OpenAlgorithms( void )
++{
++    NTSTATUS status;
++
++    if (!g_ecdsa_alg)
++    {
++        status = BCryptOpenAlgorithmProvider( &g_ecdsa_alg,
++                                              BCRYPT_ECDSA_P256_ALGORITHM,
++                                              NULL, 0 );
++        if (status)
++            return HRESULT_FROM_NT( status );
++    }
++    if (!g_sha256_alg)
++    {
++        status = BCryptOpenAlgorithmProvider( &g_sha256_alg,
++                                              BCRYPT_SHA256_ALGORITHM,
++                                              NULL, 0 );
++        if (status)
++            return HRESULT_FROM_NT( status );
++    }
++    return S_OK;
++}
++
++HRESULT DeviceAuth_InitializePreauthenticated(
++    const BYTE *device_token, UINT32 device_token_len,
++    const BYTE *device_id, UINT32 device_id_len,
++    const BYTE *private_blob_b64, UINT32 private_blob_b64_len )
++{
++    BCRYPT_KEY_HANDLE key = NULL;
++    BCRYPT_ECCKEY_BLOB *header;
++    HSTRING token = NULL;
++    BYTE public_blob[128];
++    BYTE *private_blob = NULL;
++    LPWSTR token_wide = NULL;
++    DWORD private_blob_len = 0;
++    ULONG public_blob_len = 0;
++    INT token_wide_len;
++    NTSTATUS status;
++    HRESULT hr;
++
++    if (g_initialized) return S_OK;
++    if (!device_token || !device_token_len ||
++        !device_id || !device_id_len || device_id_len >= sizeof( g_device_id ) ||
++        !private_blob_b64 || !private_blob_b64_len ||
++        memchr( device_token, 0, device_token_len ) ||
++        memchr( device_id, 0, device_id_len ) ||
++        memchr( private_blob_b64, 0, private_blob_b64_len ))
++        return E_INVALIDARG;
++
++    if (FAILED( hr = DeviceAuth_OpenAlgorithms() ))
++        return hr;
++    if (!CryptStringToBinaryA( (LPCSTR)private_blob_b64,
++                               private_blob_b64_len,
++                               CRYPT_STRING_BASE64,
++                               NULL, &private_blob_len, NULL, NULL ) ||
++        private_blob_len != sizeof( BCRYPT_ECCKEY_BLOB ) + 32 * 3)
++    {
++        hr = E_INVALIDARG;
++        goto done;
++    }
++    if (!(private_blob = malloc( private_blob_len )))
++    {
++        hr = E_OUTOFMEMORY;
++        goto done;
++    }
++    if (!CryptStringToBinaryA( (LPCSTR)private_blob_b64,
++                               private_blob_b64_len,
++                               CRYPT_STRING_BASE64,
++                               private_blob, &private_blob_len, NULL, NULL ))
++    {
++        hr = E_INVALIDARG;
++        goto done;
++    }
++    header = (BCRYPT_ECCKEY_BLOB *)private_blob;
++    if (header->dwMagic != BCRYPT_ECDSA_PRIVATE_P256_MAGIC ||
++        header->cbKey != 32)
++    {
++        hr = E_INVALIDARG;
++        goto done;
++    }
++    status = BCryptImportKeyPair( g_ecdsa_alg, NULL,
++                                  BCRYPT_ECCPRIVATE_BLOB, &key,
++                                  private_blob, private_blob_len, 0 );
++    if (status)
++    {
++        hr = HRESULT_FROM_NT( status );
++        goto done;
++    }
++    status = BCryptExportKey( key, NULL, BCRYPT_ECCPUBLIC_BLOB,
++                              public_blob, sizeof( public_blob ),
++                              &public_blob_len, 0 );
++    if (status ||
++        public_blob_len != sizeof( BCRYPT_ECCKEY_BLOB ) + 32 * 2)
++    {
++        hr = status ? HRESULT_FROM_NT( status ) : E_INVALIDARG;
++        goto done;
++    }
++
++    token_wide_len = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS,
++                                          (LPCSTR)device_token,
++                                          device_token_len, NULL, 0 );
++    if (!token_wide_len)
++    {
++        hr = HRESULT_FROM_WIN32( GetLastError() );
++        goto done;
++    }
++    if (!(token_wide = malloc( token_wide_len * sizeof( *token_wide ) )))
++    {
++        hr = E_OUTOFMEMORY;
++        goto done;
++    }
++    if (MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS,
++                             (LPCSTR)device_token, device_token_len,
++                             token_wide, token_wide_len ) != token_wide_len)
++    {
++        hr = HRESULT_FROM_WIN32( GetLastError() );
++        goto done;
++    }
++    if (FAILED( hr = WindowsCreateString( token_wide, token_wide_len,
++                                          &token ) ))
++        goto done;
++
++    memcpy( g_pubkey_x, public_blob + sizeof( BCRYPT_ECCKEY_BLOB ), 32 );
++    memcpy( g_pubkey_y,
++            public_blob + sizeof( BCRYPT_ECCKEY_BLOB ) + 32, 32 );
++    memcpy( g_device_id, device_id, device_id_len );
++    g_device_id[device_id_len] = 0;
++    g_device_key = key;
++    g_device_token = token;
++    g_initialized = TRUE;
++    key = NULL;
++    token = NULL;
++    hr = S_OK;
++    TRACE( "loaded launcher device identity\n" );
++
++done:
++    if (key) BCryptDestroyKey( key );
++    if (token) WindowsDeleteString( token );
++    free( token_wide );
++    free( private_blob );
++    return hr;
++}
++
+ /* Base64url encode without padding */
+ static void base64url_encode( const BYTE *data, SIZE_T len, LPSTR out, SIZE_T out_size )
+ {
+@@ -294,11 +437,8 @@
+     TRACE( "initializing device auth\n" );
+ 
+     /* Open algorithms */
+-    status = BCryptOpenAlgorithmProvider( &g_ecdsa_alg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0 );
+-    if (status) { WARN( "BCryptOpenAlgorithmProvider ECDSA failed: 0x%08lx\n", status ); return HRESULT_FROM_NT(status); }
+-
+-    status = BCryptOpenAlgorithmProvider( &g_sha256_alg, BCRYPT_SHA256_ALGORITHM, NULL, 0 );
+-    if (status) { WARN( "BCryptOpenAlgorithmProvider SHA256 failed: 0x%08lx\n", status ); return HRESULT_FROM_NT(status); }
++    if (FAILED( hr = DeviceAuth_OpenAlgorithms() ))
++        return hr;
+ 
+     /* Pre-auth bypass: Wine 11.1's GnuTLS schannel ClientHello is
+      * fingerprinted by Microsoft Azure — *.auth.xboxlive.com TCP-RSTs the
+--- a/dlls/xgameruntime/GDKComponent/System/User/XUser.c
++++ b/dlls/xgameruntime/GDKComponent/System/User/XUser.c
+@@ -146,6 +146,9 @@
+ 
+ enum bridge_field_index
+ {
++    BRIDGE_DEVICE_TOKEN,
++    BRIDGE_DEVICE_ID,
++    BRIDGE_PRIVATE_BLOB_B64,
+     BRIDGE_USER_TOKEN,
+     BRIDGE_XBL_TOKEN,
+     BRIDGE_XBL_XUID,
+@@ -290,7 +293,7 @@
+         !(buffer = malloc( size )) ||
+         !ReadFile( file, buffer, size, &read, NULL ) || read != size)
+         goto done;
+-    if (memcmp( buffer, "BLGDKXB1", 8 ) ||
++    if (memcmp( buffer, "BLGDKXB2", 8 ) ||
+         (count = bridge_read_u32( buffer + 8 )) != BRIDGE_FIELD_COUNT)
+     {
+         hr = E_INVALIDARG;
+@@ -323,6 +326,15 @@
+         goto done;
+     }
+ 
++    if (FAILED( hr = DeviceAuth_InitializePreauthenticated(
++                    fields[BRIDGE_DEVICE_TOKEN].data,
++                    fields[BRIDGE_DEVICE_TOKEN].size,
++                    fields[BRIDGE_DEVICE_ID].data,
++                    fields[BRIDGE_DEVICE_ID].size,
++                    fields[BRIDGE_PRIVATE_BLOB_B64].data,
++                    fields[BRIDGE_PRIVATE_BLOB_B64].size ) ))
++        goto done;
++
+     if (FAILED( hr = bridge_hstring( &fields[BRIDGE_USER_TOKEN],
+                                       &user->user_token ) ) ||
+         FAILED( hr = bridge_hstring( &fields[BRIDGE_XBL_TOKEN],

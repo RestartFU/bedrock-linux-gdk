@@ -29,6 +29,15 @@ RUN git init \
 COPY patches/winegdk-launcher-auth.patch /tmp/winegdk-launcher-auth.patch
 RUN git apply --unidiff-zero --check /tmp/winegdk-launcher-auth.patch \
  && git apply --unidiff-zero /tmp/winegdk-launcher-auth.patch
+COPY patches/winegdk-launcher-token-cache.patch /tmp/winegdk-launcher-token-cache.patch
+RUN git apply --unidiff-zero --check /tmp/winegdk-launcher-token-cache.patch \
+ && git apply --unidiff-zero /tmp/winegdk-launcher-token-cache.patch
+COPY patches/winegdk-achievements-token.patch /tmp/winegdk-achievements-token.patch
+RUN git apply --check /tmp/winegdk-achievements-token.patch \
+ && git apply /tmp/winegdk-achievements-token.patch
+COPY patches/winegdk-device-identity.patch /tmp/winegdk-device-identity.patch
+RUN git apply --check /tmp/winegdk-device-identity.patch \
+ && git apply /tmp/winegdk-device-identity.patch
 
 WORKDIR /build
 RUN /source/configure \

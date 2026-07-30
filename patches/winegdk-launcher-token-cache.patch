@@ -1,0 +1,9 @@
+diff --git a/dlls/xgameruntime/GDKComponent/System/User/XUser.c b/dlls/xgameruntime/GDKComponent/System/User/XUser.c
+--- a/dlls/xgameruntime/GDKComponent/System/User/XUser.c
++++ b/dlls/xgameruntime/GDKComponent/System/User/XUser.c
+@@ -1416 +1416 @@ static HRESULT CALLBACK XUserGetTokenAndSignatureProvider( XAsyncOp operation, c
+-            if (DeviceAuth_IsInitialized() && user_impl->oauth_token)
++            if (user_impl->oauth_token)
+@@ -1506 +1506 @@ static HRESULT CALLBACK XUserGetTokenAndSignatureProvider( XAsyncOp operation, c
+-                if (FAILED( dowork_hr ))
++                if (FAILED( dowork_hr ) && DeviceAuth_IsInitialized())

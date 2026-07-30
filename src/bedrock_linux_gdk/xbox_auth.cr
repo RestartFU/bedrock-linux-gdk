@@ -197,16 +197,20 @@ module BedrockLinuxGdk
 
     private def write_bridge_session(root : String, payload : JSON::Any) : Nil
       privileges = payload.as_h.has_key?("xbl_privileges") ? "1" : "0"
-      fields = %w(
+      field_names = %w(
+        device_token device_id ecc_private_blob_b64
         user_token xbl_token xbl_xuid xbl_gamertag xbl_modern_gamertag
         xbl_modern_gamertag_suffix xbl_unique_modern_gamertag xbl_age_group
         xbl_uhs xbl_privileges user_token_expiry_epoch xbl_token_expiry_epoch
+        achievements_token achievements_uhs achievements_expiry_epoch
         sisu_token sisu_uhs sisu_rp sisu_expiry_epoch
         mp_token mp_uhs mp_rp mp_expiry_epoch
         realms_token realms_uhs realms_rp realms_expiry_epoch
         lic_token lic_uhs lic_rp lic_expiry_epoch
-      ).map { |name| optional_string(payload, name).to_s }
-      fields.insert(9, privileges)
+      )
+      fields = field_names.map { |name| optional_string(payload, name).to_s }
+      privileges_index = field_names.index("xbl_privileges").not_nil!
+      fields.insert(privileges_index, privileges)
       fields.each do |value|
         raise "Xbox authentication returned invalid credentials." if
           value.includes?('\0') || value.bytesize > UInt32::MAX
@@ -216,7 +220,7 @@ module BedrockLinuxGdk
       temporary = "#{path}.tmp"
       Dir.mkdir_p(File.dirname(path), 0o700)
       File.open(temporary, "wb", perm: 0o600) do |file|
-        file << "BLGDKXB1"
+        file << "BLGDKXB2"
         file.write_bytes(fields.size.to_u32, IO::ByteFormat::LittleEndian)
         fields.each do |value|
           file.write_bytes(value.bytesize.to_u32, IO::ByteFormat::LittleEndian)
@@ -270,6 +274,12 @@ module BedrockLinuxGdk
         "https://user.auth.xboxlive.com/user/authenticate",
         key_path,
         user_body(access_token)
+      )
+      user_token = required_string(user, "Token")
+      achievements = xbox_post(
+        "https://xsts.auth.xboxlive.com/xsts/authorize",
+        key_path,
+        xsts_body(user_token, "http://xboxlive.com")
       )
 
       profile = authorization(
@@ -344,6 +354,12 @@ module BedrockLinuxGdk
       )
       put_token(fields, "device_token", device)
       put_token(fields, "user_token", user)
+      put_sisu(
+        fields,
+        "achievements",
+        "http://xboxlive.com",
+        achievements
+      )
       put_token(fields, "xbl_token", profile)
       put_claim(fields, "xbl_xuid", profile_claims, "xid")
       put_claim(fields, "xbl_gamertag", profile_claims, "gtg")
@@ -388,6 +404,7 @@ module BedrockLinuxGdk
       required = %w(
         oauth_token refresh_token oauth_expiry_epoch
         device_token user_token xbl_token xbl_xuid xbl_uhs
+        achievements_token achievements_uhs
         sisu_token sisu_uhs mp_token mp_uhs realms_token realms_uhs
       )
       missing = required.reject { |name| !fields[name]?.to_s.empty? }
@@ -443,6 +460,17 @@ module BedrockLinuxGdk
         "OfferTermsAcceptance" => true,
         "AcceptOffers"         => true,
         "ProofKey"             => proof,
+      }.to_json
+    end
+
+    private def xsts_body(user_token : String, relying_party : String) : String
+      {
+        "RelyingParty" => relying_party,
+        "TokenType"    => "JWT",
+        "Properties"   => {
+          "SandboxId"  => "RETAIL",
+          "UserTokens" => [user_token],
+        },
       }.to_json
     end
 
@@ -558,12 +586,14 @@ module BedrockLinuxGdk
 
     private def cache_valid?(payload : JSON::Any) : Bool
       %w(
-        oauth_token refresh_token device_token user_token xbl_token xbl_xuid
-        sisu_token mp_token realms_token
+        oauth_token refresh_token device_token device_id ecc_private_blob_b64
+        user_token xbl_token xbl_xuid achievements_token sisu_token mp_token
+        realms_token
       ).all? { |field| !optional_string(payload, field).to_s.empty? } &&
         %w(
           oauth_expiry_epoch device_token_expiry_epoch user_token_expiry_epoch
-          xbl_token_expiry_epoch sisu_token_expiry_epoch
+          xbl_token_expiry_epoch achievements_expiry_epoch
+          sisu_token_expiry_epoch
           mp_token_expiry_epoch realms_token_expiry_epoch
         ).all? do |field|
           (optional_string(payload, field).try(&.to_i64?) || 0_i64) >
