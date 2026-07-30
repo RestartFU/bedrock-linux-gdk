@@ -68,6 +68,7 @@ RUN apt-get update \
       librsvg2-common \
       openssl \
       patchelf \
+      python3-pip \
       shared-mime-info \
       xkb-data \
  && rm -rf /var/lib/apt/lists/*
@@ -83,6 +84,11 @@ COPY scripts/bedrock-linux-gdk.sh /usr/local/share/bedrock-linux-gdk.sh
 COPY --from=crystal /crystal-build/bedrock-linux-gdk /stage/usr/bin/bedrock-linux-gdk
 
 RUN set -eux; \
+    python3 -m pip install \
+      --break-system-packages \
+      --no-cache-dir \
+      --target /stage/usr/share/bedrock-linux-gdk/python \
+      cryptography==43.0.3; \
     test "$PROFILE" = default || test "$PROFILE" = nightly; \
     if [ "$PROFILE" = nightly ]; then \
       app_id=com.restartfu.BedrockLinuxGdk.Nightly; \

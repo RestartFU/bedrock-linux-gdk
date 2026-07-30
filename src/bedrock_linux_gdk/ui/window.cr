@@ -770,7 +770,7 @@ module BedrockLinuxGdk
         run_operation(
           "Checking system requirements",
           ["doctor"],
-          ->(_lines : Array(String), healthy : Bool) {
+          ->(lines : Array(String), healthy : Bool) {
             if healthy
               run_operation(
                 "Installing Minecraft",
@@ -787,12 +787,26 @@ module BedrockLinuxGdk
               Dialogs.error(
                 @widget,
                 "System check failed",
-                "Nothing was downloaded. Fix the reported requirements, " \
-                "then try again."
+                doctor_failure_message(lines)
               )
             end
           }
         )
+      end
+
+      private def doctor_failure_message(lines : Array(String)) : String
+        details = lines.select do |line|
+          normalized = line.downcase
+          normalized.includes?("missing") ||
+            normalized.includes?("install") ||
+            normalized.includes?("failed") ||
+            normalized.starts_with?("warn") ||
+            normalized.starts_with?("error")
+        end.last(6)
+
+        return "Nothing was downloaded. Fix reported requirements, then try again." if details.empty?
+
+        "Nothing was downloaded.\n\n#{details.join('\n')}"
       end
 
       private def selected_version : VersionEntry?

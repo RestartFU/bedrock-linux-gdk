@@ -125,6 +125,13 @@ cp /etc/ssl/openssl.cnf "$out/etc/ssl/openssl.cnf"
 
 mkdir -p "$out/share/applications"
 cp -a "$stage/usr/share/applications/." "$out/share/applications/"
+
+if [ -d "$stage/usr/share/bedrock-linux-gdk/python" ]; then
+  mkdir -p "$out/share/bedrock-linux-gdk"
+  cp -a "$stage/usr/share/bedrock-linux-gdk/python" \
+    "$out/share/bedrock-linux-gdk/"
+fi
+
 install -Dm755 "$launcher" "$out/bedrock-linux-gdk.sh"
 
 printf 'bundle: %s libraries, %s\n' \
