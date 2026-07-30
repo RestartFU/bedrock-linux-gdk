@@ -20,6 +20,10 @@ install -Dm755 \
 install -Dm755 \
   "$stage/usr/bin/bedrock-linux-gdk-engine" \
   "$out/bin/bedrock-linux-gdk-engine"
+mkdir -p "$out/libexec/bedrock-linux-gdk"
+cp -a \
+  "$stage/usr/libexec/bedrock-linux-gdk/." \
+  "$out/libexec/bedrock-linux-gdk/"
 
 mkdir -p "$out/lib/gdk-pixbuf-2.0/loaders"
 cp -a "$pixbuf_loaders"/*.so "$out/lib/gdk-pixbuf-2.0/loaders/"

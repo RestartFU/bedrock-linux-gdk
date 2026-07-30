@@ -4,6 +4,64 @@
 # complete GTK/libadwaita library closure and runs on glibc x86_64 systems,
 # including NixOS hosts without a conventional /lib64 loader.
 
+FROM debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd AS winegdk-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bison \
+      build-essential \
+      ca-certificates \
+      flex \
+      g++-mingw-w64-x86-64 \
+      gcc-mingw-w64-x86-64 \
+      git \
+      pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /source
+RUN git init \
+ && git remote add origin https://github.com/LukasPAH/WineGDK.git \
+ && git fetch --depth=1 origin refs/heads/rebased-minimal-xbl \
+ && test "$(git rev-parse FETCH_HEAD)" = ae946f453977d2229d7850168991743dbdd04d85 \
+ && git checkout --detach FETCH_HEAD
+
+WORKDIR /build
+RUN /source/configure \
+      --enable-win64 \
+      --without-alsa \
+      --without-cups \
+      --without-dbus \
+      --without-fontconfig \
+      --without-freetype \
+      --without-gphoto \
+      --without-gstreamer \
+      --without-krb5 \
+      --without-netapi \
+      --without-oss \
+      --without-pcap \
+      --without-pulse \
+      --without-sane \
+      --without-sdl \
+      --without-udev \
+      --without-usb \
+      --without-v4l2 \
+      --without-wayland \
+      --without-x \
+ && make -j2 dlls/xgameruntime/x86_64-windows/xgameruntime.dll
+
+COPY runtime/auth_bridge.c /runtime/auth_bridge.c
+RUN mkdir -p /runtime/out \
+ && x86_64-w64-mingw32-gcc \
+      -O2 -s -Wall -Wextra -Wno-cast-function-type \
+      -o /runtime/out/bedrock-linux-gdk-auth.exe \
+      /runtime/auth_bridge.c \
+ && install -m0644 \
+      /build/dlls/xgameruntime/x86_64-windows/xgameruntime.dll \
+      /runtime/out/xgameruntime.dll \
+ && install -m0644 /source/COPYING.LIB /runtime/out/COPYING.WineGDK
+
 FROM crystallang/crystal:1.21.0@sha256:32b7b908a8c3625ebd629053daf48b6f469deaf74aeb71ad101895096b1665fa AS toolchain
 
 RUN apt-get update \
@@ -85,6 +143,7 @@ COPY scripts/bundle.sh /usr/local/bin/bundle.sh
 COPY scripts/bedrock-linux-gdk.sh /usr/local/share/bedrock-linux-gdk.sh
 COPY --from=crystal /crystal-build/bedrock-linux-gdk /stage/usr/bin/bedrock-linux-gdk
 COPY --from=crystal /crystal-build/bedrock-linux-gdk-engine /stage/usr/bin/bedrock-linux-gdk-engine
+COPY --from=winegdk-runtime /runtime/out /stage/usr/libexec/bedrock-linux-gdk
 
 RUN set -eux; \
     test "$PROFILE" = default || test "$PROFILE" = nightly; \

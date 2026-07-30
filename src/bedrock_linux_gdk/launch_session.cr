@@ -6,9 +6,11 @@ module BedrockLinuxGdk
     key : String,
     name : String,
     data_dir : String,
+    shared_dir : String,
     isolated : Bool do
     def environment(base : Hash(String, String)) : Hash(String, String)
       values = base.dup
+      values["BEDROCK_LINUX_GDK_SHARED_HOME"] = @shared_dir
       if @isolated
         values["BEDROCK_LINUX_GDK_HOME"] = @data_dir
       end
@@ -35,6 +37,7 @@ module BedrockLinuxGdk
         "default",
         "Default",
         default_data_dir,
+        default_data_dir,
         true
       )
     end
@@ -52,7 +55,13 @@ module BedrockLinuxGdk
         name = JSON.parse(File.read(metadata))["name"]?.try(&.as_s?)
         next unless name && !name.strip.empty?
 
-        sessions << LaunchSession.new(slug, name, directory, true)
+        sessions << LaunchSession.new(
+          slug,
+          name,
+          directory,
+          @default.shared_dir,
+          true
+        )
       rescue JSON::ParseException | File::Error
       end
       sessions.sort_by! { |session| session.name.downcase }
@@ -81,7 +90,13 @@ module BedrockLinuxGdk
         {"name" => display}.to_pretty_json + "\n",
         perm: 0o600
       )
-      LaunchSession.new(slug, display, directory, true)
+      LaunchSession.new(
+        slug,
+        display,
+        directory,
+        @default.shared_dir,
+        true
+      )
     rescue error
       if created && directory && Dir.exists?(directory) &&
          !File.exists?(File.join(directory, "settings.json"))

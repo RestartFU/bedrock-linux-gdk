@@ -24,4 +24,16 @@ describe BedrockLinuxGdk::Paths do
     )
     paths.data_dir.should eq("/games/bedrock")
   end
+
+  it "shares game installs across account profiles" do
+    paths = BedrockLinuxGdk::Paths.new(
+      "/home/test",
+      {
+        "BEDROCK_LINUX_GDK_HOME"        => "/profiles/player-two",
+        "BEDROCK_LINUX_GDK_SHARED_HOME" => "/games/bedrock",
+      }
+    )
+    paths.data_dir.should eq("/profiles/player-two")
+    paths.games_dir.should eq("/games/bedrock/games")
+  end
 end

@@ -1,6 +1,7 @@
 require "spec"
 require "file_utils"
 require "random/secure"
+require "../src/bedrock_linux_gdk/account"
 require "../src/bedrock_linux_gdk/backend"
 require "../src/bedrock_linux_gdk/host_environment"
 require "../src/bedrock_linux_gdk/launch_session"

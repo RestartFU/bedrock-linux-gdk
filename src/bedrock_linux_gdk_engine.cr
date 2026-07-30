@@ -1,6 +1,6 @@
+require "digest/sha256"
 require "http/client"
 require "json"
-require "uri"
 require "file_utils"
 require "./bedrock_linux_gdk/version"
 
@@ -11,13 +11,11 @@ module BedrockLinuxGdk
     RELEASES_URL       = "https://api.github.com/repos/bubbles-wow/mcbe-gdk-unpack-archive/releases?per_page=100"
     PROTON_RELEASE_URL = "https://api.github.com/repos/Weather-OS/GDK-Proton/releases/latest"
     UMU_RELEASE_URL    = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest"
+    DXVK_VERSION       = "3.0.1"
+    DXVK_URL           = "https://github.com/doitsujin/dxvk/releases/download/v#{DXVK_VERSION}/dxvk-#{DXVK_VERSION}.tar.gz"
+    DXVK_SHA256        = "bebb6284db590535b7b005c102ebf6850c98842cff0fded9aacb74babae14c49"
     GAME_INPUT_VERSION = "3.5.262"
     GAME_INPUT_URL     = "https://api.nuget.org/v3-flatcontainer/microsoft.gameinput/#{GAME_INPUT_VERSION}/microsoft.gameinput.#{GAME_INPUT_VERSION}.nupkg"
-    DEVICE_URL         = "https://login.live.com/oauth20_connect.srf"
-    TOKEN_URL          = "https://login.live.com/oauth20_token.srf"
-    CLIENT_ID          = "0000000048183522"
-    SCOPE              = "service::user.auth.xboxlive.com::MBI_SSL"
-
     record Release,
       tag : String,
       beta : Bool,
@@ -65,6 +63,11 @@ module BedrockLinuxGdk
       File.join(data_home, "bedrock-linux-gdk")
     end
 
+    private def shared_root : String
+      override = ENV["BEDROCK_LINUX_GDK_SHARED_HOME"]?.to_s.strip
+      override.empty? ? root : File.expand_path(override)
+    end
+
     private def versions(include_beta : Bool) : Int32
       releases.each do |release|
         next if release.beta && !include_beta
@@ -106,7 +109,7 @@ module BedrockLinuxGdk
     end
 
     private def fetch_releases : String
-      cache = File.join(root, "cache", "minecraft-releases.json")
+      cache = File.join(shared_root, "cache", "minecraft-releases.json")
       begin
         response = HTTP::Client.get(
           RELEASES_URL,
@@ -129,10 +132,9 @@ module BedrockLinuxGdk
       info("Bedrock Linux GDK engine — system check")
       missing = [] of String
       {
-        "curl"    => find_command("curl"),
-        "python3" => find_command("python3"),
-        "tar"     => find_command("tar"),
-        "unzip"   => find_command("unzip"),
+        "curl"  => find_command("curl"),
+        "tar"   => find_command("tar"),
+        "unzip" => find_command("unzip"),
       }.each do |name, path|
         if path
           puts "#{name.ljust(12)} : OK"
@@ -164,8 +166,10 @@ module BedrockLinuxGdk
 
       umu = ensure_umu
       engine = ensure_proton
+      ensure_dxvk(engine)
       ensure_prefix(umu, engine)
       ensure_game_input(umu, engine)
+      ensure_runtime_bridge(engine)
 
       save_game(tag, game)
       ok("Minecraft #{tag} ready.")
@@ -175,8 +179,8 @@ module BedrockLinuxGdk
     private def install_game(release : Release) : String
       curl = find_command("curl") || raise "curl is missing."
       unzip = find_command("unzip") || raise "unzip is missing."
-      cache = File.join(root, "cache")
-      games = File.join(root, "games")
+      cache = File.join(shared_root, "cache")
+      games = File.join(shared_root, "games")
       archive = File.join(cache, release.name)
       staging = File.join(games, ".#{release.tag}.installing")
       target = File.join(games, release.tag)
@@ -213,7 +217,7 @@ module BedrockLinuxGdk
     end
 
     private def find_game(tag : String) : String?
-      find_game_root(File.join(root, "games", tag))
+      find_game_root(File.join(shared_root, "games", tag))
     end
 
     private def find_game_root(directory : String) : String?
@@ -248,9 +252,12 @@ module BedrockLinuxGdk
       game = selected_game || raise "No game installed — choose a Minecraft version first."
       engine = proton || raise "Compatibility engine missing — run Install / Update."
       umu = umu_command || raise "umu-run is missing."
+      ensure_dxvk(engine)
       patch_compatibility_engine(engine)
       prefix = File.join(root, "compatdata", "pfx")
       raise "Wine prefix missing — run Install / Update." unless File.file?(File.join(prefix, "system.reg"))
+      raise "No Microsoft account linked — click Sign in first." unless account_linked?
+      ensure_runtime_bridge(engine)
 
       environment = compatibility_environment(engine)
       environment["WINEDLLOVERRIDES"] =
@@ -258,13 +265,6 @@ module BedrockLinuxGdk
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_SHOWUI"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_FAILFAST"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_DEPLOYMENT_INITIALIZE_ONERRORSHOWUI"] = "0"
-      preauth = File.join(root, "winegdk-preauth", "device.json")
-      if File.file?(preauth)
-        environment["WINEGDK_PREAUTH_DEVICE"] =
-          "Z:#{preauth.gsub('/', '\\')}"
-      end
-
-      seed_token(umu, environment)
       info("Starting Minecraft.")
       status = Process.run(
         umu,
@@ -277,91 +277,89 @@ module BedrockLinuxGdk
       status.exit_code
     end
 
-    private def seed_token(umu : String, environment : Hash(String, String)) : Nil
-      token_file = File.join(root, "msa", "token.json")
-      return unless File.file?(token_file)
-      token = JSON.parse(File.read(token_file))["refresh_token"]?.try(&.as_s?).to_s
-      return if token.empty?
-
-      status = Process.run(
-        umu,
-        [
-          "reg.exe", "ADD", "HKLM\\Software\\Wine\\WineGDK",
-          "/v", "RefreshToken", "/t", "REG_SZ", "/d", token, "/f",
-        ],
-        env: environment,
-        output: Process::Redirect::Close,
-        error: Process::Redirect::Close
-      )
-      warn("Could not seed Microsoft token into prefix.") unless status.success?
-    rescue JSON::ParseException | File::Error
-      warn("Microsoft token cache is invalid.")
-    end
-
     private def login : Int32
-      Dir.mkdir_p(File.join(root, "msa"), 0o700)
-      response = post_form(DEVICE_URL, {
-        "client_id"     => CLIENT_ID,
-        "scope"         => SCOPE,
-        "response_type" => "device_code",
-      })
-      device_code = response["device_code"]?.try(&.as_s?)
-      raise response["error_description"]?.try(&.as_s?) ||
-            "Microsoft device-code request failed." unless device_code
+      game = selected_game ||
+             raise "Install Minecraft before signing in."
+      engine = proton ||
+               raise "Compatibility engine missing — run Install / Update."
+      umu = umu_command || raise "umu-run is missing."
+      prefix = File.join(root, "compatdata", "pfx")
+      raise "Wine prefix missing — run Install / Update." unless File.file?(File.join(prefix, "system.reg"))
 
-      url = response["verification_uri"]?.try(&.as_s?) ||
-            "https://www.microsoft.com/link"
-      code = response["user_code"]?.try(&.as_s?).to_s
-      info("Microsoft sign-in: #{url} code #{code}")
-      Process.new(find_command("xdg-open").not_nil!, [url]) if find_command("xdg-open")
+      ensure_runtime_bridge(engine)
+      helper = File.join(game, "bedrock-linux-gdk-auth.exe")
+      File.copy(runtime_asset("bedrock-linux-gdk-auth.exe"), helper)
+      File.chmod(helper, 0o755)
 
-      interval = response["interval"]?.try(&.as_i?) || 5
-      expires = response["expires_in"]?.try(&.as_i?) || 900
-      deadline = Time.instant + expires.seconds
-      while Time.instant < deadline
-        sleep interval.seconds
-        token = post_form(TOKEN_URL, {
-          "client_id"   => CLIENT_ID,
-          "grant_type"  => "device_code",
-          "device_code" => device_code,
-        })
-        case token["error"]?.try(&.as_s?)
-        when "authorization_pending"
-          next
-        when "slow_down"
-          interval += 5
-          next
-        when String
-          raise token["error_description"]?.try(&.as_s?) ||
-                "Microsoft sign-in failed."
+      auth_dir = File.join(root, "auth")
+      result = File.join(auth_dir, "events.log")
+      Dir.mkdir_p(auth_dir, 0o700)
+      File.write(result, "", perm: 0o600)
+
+      environment = compatibility_environment(engine)
+      environment["PROTON_VERB"] = "waitforexitandrun"
+      environment["PROTON_ENABLE_WAYLAND"] = "0"
+      environment["BEDROCK_LINUX_GDK_AUTH_RESULT"] = wine_path(result)
+      environment["WINEDLLOVERRIDES"] =
+        "cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64="
+
+      process_error = nil.as(String?)
+      finished = Channel(Nil).new(1)
+      spawn do
+        begin
+          Process.run(
+            umu,
+            [helper],
+            env: environment,
+            chdir: game,
+            output: Process::Redirect::Close,
+            error: Process::Redirect::Close
+          )
+        rescue exception
+          process_error = exception.message || exception.class.name
+        ensure
+          finished.send(nil)
         end
-
-        refresh = token["refresh_token"]?.try(&.as_s?)
-        next unless refresh
-        write_json(
-          File.join(root, "msa", "token.json"),
-          JSON.parse({
-            "refresh_token" => refresh,
-            "obtained"      => Time.utc.to_unix,
-          }.to_json)
-        )
-        ok("Microsoft account linked.")
-        return 0
       end
-      raise "Microsoft sign-in timed out."
-    end
 
-    private def post_form(url : String, values : Hash(String, String)) : JSON::Any
-      body = URI::Params.encode(values)
-      response = HTTP::Client.post(
-        url,
-        headers: HTTP::Headers{
-          "Content-Type" => "application/x-www-form-urlencoded",
-          "User-Agent"   => "bedrock-linux-gdk/#{BedrockLinuxGdk::VERSION}",
-        },
-        body: body
+      seen = 0
+      loop do
+        lines = auth_event_lines(result)
+        lines[seen..]?.try(&.each { |line| puts line })
+        seen = lines.size
+        select
+        when finished.receive
+          lines = auth_event_lines(result)
+          lines[seen..]?.try(&.each { |line| puts line })
+          break
+        when timeout(250.milliseconds)
+        end
+      end
+
+      raise process_error.not_nil! if process_error
+      account = auth_event_lines(result)
+        .reverse
+        .find(&.starts_with?("account\t"))
+      unless account
+        failure = auth_event_lines(result)
+          .reverse
+          .find(&.starts_with?("error\t"))
+        detail = failure ? failure.split('\t').last? : nil
+        raise "Microsoft sign-in failed#{detail ? " (#{detail})" : ""}."
+      end
+
+      parts = account.split('\t', 3)
+      raise "Microsoft sign-in returned an invalid account." unless parts.size == 3
+      write_json(
+        File.join(root, "account.json"),
+        JSON.parse({
+          "user_id"   => parts[1],
+          "gamertag"  => parts[2],
+          "linked_at" => Time.utc.to_unix,
+        }.to_json)
       )
-      JSON.parse(response.body)
+      ok("Microsoft account linked#{parts[2].empty? ? "" : " as #{parts[2]}"}.")
+      0
     end
 
     private def selected_game : String?
@@ -369,6 +367,14 @@ module BedrockLinuxGdk
       return game if game && File.file?(File.join(game, "Minecraft.Windows.exe"))
       version = load_settings["mc_version"]?.try(&.as_s?)
       version ? find_game(version) : nil
+    end
+
+    private def account_linked? : Bool
+      path = File.join(root, "account.json")
+      return false unless File.file?(path)
+      !JSON.parse(File.read(path))["user_id"]?.try(&.as_s?).to_s.empty?
+    rescue JSON::ParseException | File::Error
+      false
     end
 
     private def ensure_umu : String
@@ -379,9 +385,9 @@ module BedrockLinuxGdk
       asset = github_asset(UMU_RELEASE_URL) do |name|
         name.ends_with?("-zipapp.tar")
       end
-      archive = File.join(root, "cache", asset[:name])
-      staging = File.join(root, "tools", ".umu.installing")
-      target = File.join(root, "tools", "umu")
+      archive = File.join(shared_root, "cache", asset[:name])
+      staging = File.join(shared_root, "tools", ".umu.installing")
+      target = File.join(shared_root, "tools", "umu")
       download(asset[:url], archive, asset[:size])
 
       FileUtils.rm_r(staging) if Dir.exists?(staging)
@@ -407,9 +413,9 @@ module BedrockLinuxGdk
       asset = github_asset(PROTON_RELEASE_URL) do |name|
         name.ends_with?(".tar.gz")
       end
-      archive = File.join(root, "cache", asset[:name])
-      staging = File.join(root, "proton", ".gdk-proton.installing")
-      target = File.join(root, "proton", "GDK-Proton")
+      archive = File.join(shared_root, "cache", asset[:name])
+      staging = File.join(shared_root, "proton", ".gdk-proton.installing")
+      target = File.join(shared_root, "proton", "GDK-Proton")
       download(asset[:url], archive, asset[:size])
 
       FileUtils.rm_r(staging) if Dir.exists?(staging)
@@ -425,6 +431,46 @@ module BedrockLinuxGdk
       engine = target
       ok("GDK-Proton ready.")
       engine
+    end
+
+    private def ensure_dxvk(engine : String) : Nil
+      target = File.join(engine, "files", "lib", "wine", "dxvk")
+      version_file = File.join(target, "version")
+      if File.file?(version_file) &&
+         File.read(version_file).includes?("v#{DXVK_VERSION}")
+        return
+      end
+
+      archive = File.join(shared_root, "cache", "dxvk-#{DXVK_VERSION}.tar.gz")
+      download(DXVK_URL, archive, 0)
+      digest = Digest::SHA256.hexdigest(File.read(archive))
+      raise "DXVK archive checksum mismatch." unless digest == DXVK_SHA256
+
+      staging = File.join(shared_root, "proton", ".dxvk.installing")
+      FileUtils.rm_r(staging) if Dir.exists?(staging)
+      Dir.mkdir_p(staging, 0o700)
+      extract_tar(archive, staging)
+      source = File.join(staging, "dxvk-#{DXVK_VERSION}")
+      raise "DXVK archive is incomplete." unless Dir.exists?(source)
+
+      {
+        "x64" => "x86_64-windows",
+        "x32" => "i386-windows",
+      }.each do |source_arch, target_arch|
+        %w(d3d9 d3d10core d3d11 dxgi).each do |name|
+          from = File.join(source, source_arch, "#{name}.dll")
+          to = File.join(target, target_arch, "#{name}.dll")
+          raise "DXVK archive is incomplete." unless File.file?(from)
+          File.copy(to, "#{to}.gdk-base") unless File.file?("#{to}.gdk-base")
+          File.copy(from, to)
+        end
+      end
+      File.write(
+        version_file,
+        "v#{DXVK_VERSION} dxvk (v#{DXVK_VERSION})\n"
+      )
+      FileUtils.rm_r(staging)
+      ok("DXVK #{DXVK_VERSION} ready.")
     end
 
     private def patch_compatibility_engine(engine : String) : Nil
@@ -582,7 +628,7 @@ module BedrockLinuxGdk
         "cache",
         "Microsoft.GameInput.#{GAME_INPUT_VERSION}.nupkg"
       )
-      installer = File.join(root, "cache", "GameInputRedist.msi")
+      installer = File.join(shared_root, "cache", "GameInputRedist.msi")
       download(GAME_INPUT_URL, archive, 0_i64)
       unzip = find_command("unzip") || raise "unzip is missing."
       File.open(installer, "wb", perm: 0o600) do |output|
@@ -613,6 +659,59 @@ module BedrockLinuxGdk
       ok("Microsoft GameInput ready.")
     end
 
+    private def ensure_runtime_bridge(engine : String) : Nil
+      source = runtime_asset("xgameruntime.dll")
+      wine = File.join(engine, "files", "lib", "wine", "x86_64-windows")
+      threading = File.join(wine, "xgameruntime.dll.threading")
+      target = File.join(wine, "xgameruntime.dll")
+      raise "Official Xbox runtime is missing from GDK-Proton." unless File.file?(threading)
+      raise "GDK-Proton runtime directory is missing." unless Dir.exists?(wine)
+
+      changed = copy_if_changed(source, target, backup: "#{target}.gdk-stock")
+      prefix_target = File.join(
+        root,
+        "compatdata",
+        "pfx",
+        "drive_c",
+        "windows",
+        "system32",
+        "xgameruntime.dll"
+      )
+      if Dir.exists?(File.dirname(prefix_target))
+        changed = copy_if_changed(source, prefix_target) || changed
+      end
+      ok("Xbox runtime bridge ready.") if changed
+    end
+
+    private def runtime_asset(name : String) : String
+      directory = ENV["BEDROCK_LINUX_GDK_RUNTIME_DIR"]?.to_s.strip
+      raise "Bundled runtime directory is unavailable — reinstall Bedrock Linux GDK." if directory.empty?
+      path = File.join(directory, name)
+      raise "Bundled runtime asset is missing: #{name}." unless File.file?(path)
+      path
+    end
+
+    private def copy_if_changed(
+      source : String,
+      target : String,
+      backup : String? = nil,
+    ) : Bool
+      if File.file?(target)
+        return false if Digest::SHA256.hexdigest(File.read(source)) ==
+                          Digest::SHA256.hexdigest(File.read(target))
+        File.copy(target, backup) if backup && !File.file?(backup)
+      end
+      Dir.mkdir_p(File.dirname(target), 0o700)
+      File.copy(source, target)
+      true
+    end
+
+    private def auth_event_lines(path : String) : Array(String)
+      File.read_lines(path).map(&.strip).reject(&.empty?)
+    rescue File::Error
+      [] of String
+    end
+
     private def wine_path(path : String) : String
       "Z:#{File.expand_path(path).gsub('/', '\\')}"
     end
@@ -624,12 +723,14 @@ module BedrockLinuxGdk
       environment["WINEPREFIX"] = File.join(root, "compatdata", "pfx")
       environment["GAMEID"] = "umu-default"
       environment["PROTON_USE_WOW64"] = "1"
-      environment["UMU_FOLDERS_PATH"] = root
+      environment["UMU_FOLDERS_PATH"] = shared_root
       environment["UMU_RUNTIME_UPDATE"] = "0"
-      environment["PROTON_ENABLE_WAYLAND"] = "0"
       unless environment["WAYLAND_DISPLAY"]?.to_s.strip.empty?
-        environment["WINE_DISABLE_VULKAN_OPWR"] = "1"
+        environment["PROTON_ENABLE_WAYLAND"] = "1"
+        environment.delete("DISPLAY")
+        environment.delete("WINE_DISABLE_VULKAN_OPWR")
       else
+        environment["PROTON_ENABLE_WAYLAND"] = "0"
         environment.delete("WINE_DISABLE_VULKAN_OPWR")
       end
       environment
@@ -696,7 +797,7 @@ module BedrockLinuxGdk
     end
 
     private def proton : String?
-      path = File.join(root, "proton", "GDK-Proton")
+      path = File.join(shared_root, "proton", "GDK-Proton")
       executable = File.join(path, "proton")
       manifest = File.join(path, "toolmanifest.vdf")
       File::Info.executable?(executable) && File.file?(manifest) ? path : nil
@@ -705,7 +806,7 @@ module BedrockLinuxGdk
     end
 
     private def umu_command : String?
-      bundled = File.join(root, "tools", "umu", "umu-run")
+      bundled = File.join(shared_root, "tools", "umu", "umu-run")
       return bundled if File::Info.executable?(bundled)
       override = ENV["BEDROCK_LINUX_GDK_UMU"]?
       return override if override && File::Info.executable?(override)

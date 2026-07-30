@@ -24,22 +24,24 @@ independently testable.
 - Microsoft sign-in status and login
 - Account manager for adding and switching isolated Microsoft accounts
 - Independent concurrent sessions with separate accounts, prefixes, worlds
-  and game files
-- Fail-fast Play pipeline: sign-in and system checks run before downloads
-- First-party Crystal install, login, update and launch engine
+  and shared game installs
+- Fail-fast Play pipeline: system checks run before downloads; account checks
+  run before launch
+- First-party Crystal install, update and launch engine
+- Launcher-only Xbox sign-in; Minecraft never opens for authentication
 - System, network and Wine-prefix diagnostics
 - Live activity output with cancellation
 - Automatic official UMU and GDK-Proton setup
 - Original voxel grass-block app icon
 
-Concurrent sessions intentionally use separate game data roots. Independent
-roots cost more disk space, but prevent account, prefix, world and runtime-lock
-collisions during simultaneous play.
+Concurrent sessions keep separate account state, Wine prefixes and worlds.
+Minecraft versions and downloads are shared, so adding or switching an account
+never reinstalls the game.
 
 ## Requirements
 
 - x86_64 Linux with Vulkan support
-- `curl`, `python3`, `tar` and `unzip`
+- `curl`, `tar` and `unzip`
 - Docker only when building from source
 
 ## Build
@@ -132,4 +134,5 @@ reused, modified or locked.
 
 ## License
 
-MIT
+Launcher code is MIT. Bundle also includes a pinned LGPL-2.1 WineGDK runtime
+component with its license in `libexec/bedrock-linux-gdk/COPYING.WineGDK`.

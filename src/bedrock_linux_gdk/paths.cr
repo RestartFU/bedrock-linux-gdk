@@ -25,16 +25,20 @@ module BedrockLinuxGdk
       File.join(data_dir, "settings.json")
     end
 
-    def token_file : String
-      File.join(data_dir, "msa", "token.json")
+    def shared_dir : String
+      if override = @environment["BEDROCK_LINUX_GDK_SHARED_HOME"]?
+        clean = override.strip
+        return File.expand_path(clean, @home) unless clean.empty?
+      end
+      data_dir
     end
 
-    def device_file : String
-      File.join(data_dir, "winegdk-preauth", "device.json")
+    def account_file : String
+      File.join(data_dir, "account.json")
     end
 
     def games_dir : String
-      File.join(data_dir, "games")
+      File.join(shared_dir, "games")
     end
 
     def logs_dir : String

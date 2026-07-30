@@ -60,7 +60,7 @@ module BedrockLinuxGdk
         @session_model = Gtk::StringList.new(@sessions.map(&.name))
         @session_row = Adw::ComboRow.new
         @session_row.title = "Session"
-        @session_row.subtitle = "Independent account, worlds and game files"
+        @session_row.subtitle = "Independent account, worlds and Wine prefix"
         @session_row.add_css_class("gdk-version")
         @session_row.notify_signal["selected"].connect do |_property|
           session_selected
@@ -454,9 +454,8 @@ module BedrockLinuxGdk
         title.add_css_class("title-1")
 
         description = Gtk::Label.new(
-          "Each session has its own account, Wine prefix, worlds and game " \
-          "files, so sessions can run simultaneously. Expect several " \
-          "gigabytes per session."
+          "Each session has its own account, Wine prefix and worlds, while " \
+          "Minecraft downloads are shared. Sessions can run simultaneously."
         )
         description.xalign = 0_f32
         description.wrap = true
@@ -683,14 +682,14 @@ module BedrockLinuxGdk
           return
         end
 
-        unless AccountState.read(@paths).signed_in
-          @status_label.text = "Sign in before installing or playing."
-          show_account_manager
+        unless version_installed?(version.tag)
+          preflight_install(version, launch_after: true)
           return
         end
 
-        unless version_installed?(version.tag)
-          preflight_install(version, launch_after: true)
+        unless AccountState.read(@paths).signed_in
+          @status_label.text = "Sign in before playing."
+          show_account_manager
           return
         end
 
@@ -754,18 +753,13 @@ module BedrockLinuxGdk
           return
         end
 
-        unless AccountState.read(@paths).signed_in
-          @status_label.text = "Sign in before installing Minecraft."
-          show_account_manager
-          return
-        end
-
         preflight_install(version, launch_after: false)
       end
 
       private def preflight_install(
         version : VersionEntry,
         launch_after : Bool,
+        sign_in_after : Bool = false,
       ) : Nil
         run_operation(
           "Checking system requirements",
@@ -773,13 +767,17 @@ module BedrockLinuxGdk
           ->(lines : Array(String), healthy : Bool) {
             if healthy
               run_operation(
-                "Installing Minecraft",
+                "Preparing Minecraft",
                 ["setup", "--mc", version.tag],
                 ->(_setup_lines : Array(String), installed : Bool) {
                   if installed
                     mark_version_installed(version.tag)
                     refresh_install_state
-                    launch_current_session if launch_after
+                    if sign_in_after
+                      start_sign_in
+                    elsif launch_after
+                      play
+                    end
                   end
                 }
               )
@@ -835,12 +833,155 @@ module BedrockLinuxGdk
           append_log("Microsoft account already linked.")
           return
         end
-        run_operation(
-          "Microsoft sign-in",
-          ["login"],
-          ->(_lines : Array(String), _success : Bool) {
-            refresh_account
-          }
+
+        version = selected_version
+        unless version
+          Dialogs.error(
+            @widget,
+            "Minecraft versions are still loading",
+            "Wait for the version list, then try again."
+          )
+          return
+        end
+        unless version_installed?(version.tag)
+          preflight_install(
+            version,
+            launch_after: false,
+            sign_in_after: true
+          )
+          return
+        end
+        return if @job.running
+
+        dialog = Adw::Dialog.new(
+          title: "Microsoft sign-in",
+          content_width: 480,
+          content_height: 330
+        )
+        header = Adw::HeaderBar.new
+        header.title_widget = Adw::WindowTitle.new(
+          title: "Microsoft account",
+          subtitle: @current_session.name
+        )
+
+        status = Gtk::Label.new("Preparing secure sign-in…")
+        status.wrap = true
+        status.add_css_class("title-3")
+
+        code = Gtk::Label.new("")
+        code.selectable = true
+        code.add_css_class("title-1")
+        code.add_css_class("gdk-auth-code")
+
+        hint = Gtk::Label.new(
+          "A browser page will ask for this one-time code. " \
+          "Minecraft stays closed."
+        )
+        hint.wrap = true
+        hint.add_css_class("dim-label")
+
+        open = Gtk::Button.new_with_label("Open Microsoft sign-in")
+        open.add_css_class("suggested-action")
+        open.sensitive = false
+        sign_in_url = ""
+        open.clicked_signal.connect do
+          unless sign_in_url.empty?
+            spawn do
+              begin
+                result = Process.run(
+                  "xdg-open",
+                  [sign_in_url],
+                  env: HostEnvironment.values,
+                  output: Process::Redirect::Close,
+                  error: Process::Redirect::Close
+                )
+                raise "xdg-open exited with status #{result.exit_code}." unless result.success?
+              rescue error
+                GLib.idle_add do
+                  Dialogs.error(
+                    @widget,
+                    "Could not open browser",
+                    error.message || error.class.name
+                  )
+                  false
+                end
+              end
+            end
+          end
+        end
+
+        spinner = Gtk::Spinner.new
+        spinner.start
+        spinner.visible = true
+
+        content = Gtk::Box.new(:vertical, 16)
+        content.margin_top = 28
+        content.margin_bottom = 28
+        content.margin_start = 28
+        content.margin_end = 28
+        content.halign = :fill
+        content.append(spinner)
+        content.append(status)
+        content.append(code)
+        content.append(hint)
+        content.append(open)
+
+        toolbar = Adw::ToolbarView.new
+        toolbar.add_top_bar(header)
+        toolbar.content = content
+        dialog.child = toolbar
+        dialog.present(@widget)
+        PointerCursors.apply_all
+
+        session = @current_session
+        environment = session.environment(HostEnvironment.values)
+        command = @backend.command(["login"])
+        failure_detail = ""
+        append_log("› Microsoft sign-in · #{session.name}")
+        set_busy(true, "Waiting for Microsoft sign-in")
+
+        @job.start(
+          command,
+          ->(line : String) {
+            GLib.idle_add do
+              if line.starts_with?("device\t")
+                parts = line.split('\t', 3)
+                if parts.size == 3
+                  sign_in_url = parts[1]
+                  code.text = parts[2]
+                  status.text = "Enter this code in your browser"
+                  open.sensitive = sign_in_url.starts_with?("https://")
+                  spinner.stop
+                  spinner.visible = false
+                end
+              elsif !line.starts_with?("account\t")
+                append_log(line)
+                failure_detail = line if line.starts_with?("error")
+              end
+              false
+            end
+          },
+          ->(exit_code : Int32?, error : String?) {
+            success = exit_code == 0 && error.nil?
+            GLib.idle_add do
+              set_busy(false, success ? "Signed in" : "Microsoft sign-in failed")
+              refresh_account
+              if success
+                append_log("✓ Microsoft sign-in complete")
+                dialog.close
+              else
+                dialog.close
+                Dialogs.error(
+                  @widget,
+                  "Microsoft sign-in failed",
+                  error ||
+                  (failure_detail.empty? ? "Microsoft rejected or cancelled sign-in." : failure_detail)
+                )
+              end
+              false
+            end
+          },
+          environment
         )
       end
 
@@ -931,8 +1072,8 @@ module BedrockLinuxGdk
         add_row.append(add)
 
         note = Gtk::Label.new(
-          "Each account profile keeps separate credentials, worlds, game " \
-          "files and Wine prefix."
+          "Each account profile keeps separate credentials, worlds and Wine " \
+          "prefix. Installed Minecraft versions are shared."
         )
         note.wrap = true
         note.xalign = 0_f32
@@ -989,8 +1130,8 @@ module BedrockLinuxGdk
         reload_sessions(selected_key: session.key)
         select_page("home")
         append_log(
-          "Created independent session #{session.name}. Install its game " \
-          "files before first play."
+          "Created independent session #{session.name}. Shared game files " \
+          "will be reused on first play."
         )
       rescue error : ArgumentError | File::Error
         Dialogs.error(
@@ -1108,13 +1249,21 @@ module BedrockLinuxGdk
         return if clean.empty?
 
         @log_lines << clean
+        trimmed = false
         while @log_lines.size > 500
           @log_lines.shift
+          trimmed = true
         end
         buffer = @log_view.buffer
-        buffer.text = @log_lines.join('\n')
+        if trimmed
+          buffer.text = @log_lines.join('\n')
+        else
+          text = buffer.char_count.zero? ? clean : "\n#{clean}"
+          buffer.insert(buffer.end_iter, text, -1)
+        end
+        buffer.place_cursor(buffer.end_iter)
         GLib.idle_add do
-          @log_view.scroll_to_iter(buffer.end_iter, 0.0, false, 0.0, 1.0)
+          @log_view.scroll_mark_onscreen(buffer.insert)
           false
         end
       end
@@ -1135,6 +1284,8 @@ module BedrockLinuxGdk
 
       private def refresh_install_state : Nil
         version = @settings.string("mc_version")
+        game_available = !version.empty? &&
+                         File.directory?(File.join(@paths.games_dir, version))
         installed = !version.empty? && version_installed?(version)
         running = @launch_jobs[@current_session.key]?.try(&.running) || false
         @play_button.label = running ? "Running" : "Play"
@@ -1142,7 +1293,13 @@ module BedrockLinuxGdk
           !@job.running && !running && @backend.available?
         @setup_button.sensitive =
           !@job.running && !running && @backend.available?
-        @setup_button.label = installed ? "Reinstall" : "Install / Update"
+        @setup_button.label = if installed
+                                "Verify / Update"
+                              elsif game_available
+                                "Prepare session"
+                              else
+                                "Install / Update"
+                              end
         unless @job.running
           @status_label.text = if running
                                  "#{@current_session.name} running"
@@ -1150,6 +1307,8 @@ module BedrockLinuxGdk
                                  "Select a version to play."
                                elsif installed
                                  "#{version} installed"
+                               elsif game_available
+                                 "#{version} shared · session needs preparation"
                                else
                                  "#{version} will install on first launch"
                                end

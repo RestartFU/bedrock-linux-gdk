@@ -49,6 +49,7 @@ export GSK_RENDERER="${GSK_RENDERER:-ngl}"
 export __EGL_VENDOR_LIBRARY_FILENAMES="$RUNTIME/egl_vendor.json"
 export LIBGL_DRIVERS_PATH="$HERE/lib/dri"
 export PATH="$HERE/bin:$PATH"
+export BEDROCK_LINUX_GDK_RUNTIME_DIR="$HERE/libexec/bedrock-linux-gdk"
 
 exec "$HERE/lib/ld-linux-x86-64.so.2" \
   --library-path "$HERE/lib" \
