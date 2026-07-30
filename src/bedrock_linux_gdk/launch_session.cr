@@ -9,7 +9,10 @@ module BedrockLinuxGdk
     isolated : Bool do
     def environment(base : Hash(String, String)) : Hash(String, String)
       values = base.dup
-      values["BOL_HOME"] = @data_dir if @isolated
+      if @isolated
+        values["BEDROCK_LINUX_GDK_HOME"] = @data_dir
+        values["BOL_HOME"] = @data_dir
+      end
       values
     end
   end
@@ -33,7 +36,7 @@ module BedrockLinuxGdk
         "default",
         "Default",
         default_data_dir,
-        false
+        true
       )
     end
 

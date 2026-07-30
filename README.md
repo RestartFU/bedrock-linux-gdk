@@ -9,13 +9,12 @@ Built with the same application stack as
 - GTK4 through `gtk4.cr`
 - libadwaita through `gi-crystal`
 - custom modern-black GTK CSS
-- Meson and Shards
+- Shards
 
-The client intentionally keeps
-[BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux) as its execution
-backend. Login, WineGDK setup, archive verification, prefix safety, GPU
-mitigations and multiplayer pre-auth stay in the reviewed backend instead of
-being duplicated in UI code.
+Runtime work uses a small command protocol (`versions`, `setup`, `play`,
+`login`, `doctor`, `repair`, `update`). Launcher UI and runtime state remain
+separate, making long-running game processes non-blocking and independently
+testable.
 
 ## Features
 
@@ -25,16 +24,15 @@ being duplicated in UI code.
 - Microsoft sign-in status and login
 - Independent concurrent sessions with separate accounts, prefixes, worlds
   and game files
-- Compatible BedrockOnLinux settings editor
+- Compatible GDK runtime settings editor
 - System, network and Wine-prefix diagnostics
 - Live activity output with cancellation
-- Native and Flatpak backend discovery
-- Original modern voxel portal-block app icon
+- Native runtime discovery
+- Original simplified portal-stack app icon
 
-Concurrent sessions intentionally use separate game data roots. BedrockOnLinux
-profiles share multi-gigabyte assets and therefore serialize launches for
-runtime safety; bypassing that lock risks cross-session repair/update races.
-Independent roots cost more disk space but make simultaneous play safe.
+Concurrent sessions intentionally use separate game data roots. Independent
+roots cost more disk space, but prevent account, prefix, world and runtime-lock
+collisions during simultaneous play.
 
 ## Requirements
 
@@ -43,7 +41,7 @@ Independent roots cost more disk space but make simultaneous play safe.
 - GTK 4.10 or newer
 - libadwaita 1.4 or newer
 - `gobject-introspection`
-- A working BedrockOnLinux installation
+- A compatible GDK runtime
 
 ## Build
 
@@ -98,22 +96,40 @@ Header update button checks current channel. Release builds track latest
 semantic release; nightly builds track rolling `nightly` commit. Clicking an
 available update exits cleanly and reruns same atomic installer.
 
-## Backend selection
+## Publishing stable releases
+
+Open **Actions → release → Run workflow**, then choose:
+
+- `patch` for `0.0.1`
+- `minor` for `0.1.0`
+- `major` for `1.0.0`
+
+The workflow updates every version source, commits the bump to `main`, creates
+an annotated tag, runs Docker tests/build, checksums the bundle and publishes
+a normal GitHub release. Direct `vX.Y.Z` tag pushes remain supported when the
+tag already matches the source version.
+
+## Runtime selection
 
 Discovery order:
 
-1. `BEDROCK_LINUX_GDK_BACKEND=/absolute/path/to/bedrock-on-linux`
-2. Native `bedrock-on-linux` from `PATH`
-3. `io.github.wyze3306.BedrockOnLinux` Flatpak
+1. `BEDROCK_LINUX_GDK_BACKEND=/absolute/path/to/runtime`
+2. Native `bedrock-linux-gdk-engine` from `PATH`
+3. Compatible native runtime registered through a Linux desktop entry
 
-The Flatpak invocation does not hard-code `stable` or `master`, so it works
-with either installation channel.
+Runtime state stays in launcher-owned session storage for each command.
 
 ## Data compatibility
 
 The app reads and merges the backend's existing `settings.json`; unknown keys
-are preserved. It also follows `BOL_HOME`, XDG paths, Flatpak private paths and
-the backend's persistent `install_location` pointer.
+are preserved. All launcher-managed state lives under `bedrock-linux-gdk`:
+
+- Native: `${XDG_DATA_HOME:-~/.local/share}/bedrock-linux-gdk`
+- Extra sessions: `<data root>/sessions/<session>`
+
+Every runtime command receives its session root through
+`BEDROCK_LINUX_GDK_HOME`. Existing runtime state outside `bedrock-linux-gdk`
+is not reused, modified or locked.
 
 ## License
 

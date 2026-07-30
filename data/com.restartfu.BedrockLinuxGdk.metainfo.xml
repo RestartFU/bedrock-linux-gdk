@@ -7,10 +7,10 @@
   <project_license>MIT</project_license>
   <description>
     <p>
-      Bedrock Linux GDK is a Crystal, GTK4 and libadwaita frontend for
-      BedrockOnLinux. It manages versions, setup, Microsoft sign-in,
-      concurrent sessions and diagnostics while retaining the reviewed
-      WineGDK backend.
+      Bedrock Linux GDK is a Crystal, GTK4 and libadwaita launcher for
+      Minecraft Bedrock Windows GDK. It manages versions, setup, Microsoft
+      sign-in, concurrent sessions and diagnostics through a compatible GDK
+      runtime.
     </p>
   </description>
   <launchable type="desktop-id">

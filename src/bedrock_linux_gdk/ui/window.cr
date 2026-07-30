@@ -28,21 +28,11 @@ module BedrockLinuxGdk
 
       def initialize(application : Gtk::Application)
         @backend = Backend.detect
-        @paths = Paths.new(flatpak: @backend.flatpak?)
+        @paths = Paths.new
         @settings = Settings.for(@paths)
-        session_environment = ENV.to_h
-        if @backend.flatpak?
-          session_environment["XDG_DATA_HOME"] = File.join(
-            Path.home.to_s,
-            ".var",
-            "app",
-            Backend::FLATPAK_APP_ID,
-            "data"
-          )
-        end
         @session_store = SessionStore.new(
           @paths.data_dir,
-          environment: session_environment
+          environment: ENV.to_h
         )
         @sessions = @session_store.list
         @current_session = @sessions.first
@@ -354,7 +344,7 @@ module BedrockLinuxGdk
         general = Adw::PreferencesGroup.new
         general.title = "General"
         general.description =
-          "Saved directly to BedrockOnLinux's compatible settings file."
+          "Saved directly to this session's GDK settings file."
 
         betas = switch_row(
           "Show preview versions",
@@ -524,7 +514,7 @@ module BedrockLinuxGdk
         state.title = "Runtime"
 
         backend = Adw::ActionRow.new
-        backend.title = "BedrockOnLinux backend"
+        backend.title = "GDK runtime"
         backend.subtitle = @backend.label
         state.add(backend)
 
@@ -555,8 +545,8 @@ module BedrockLinuxGdk
         tools.add(network)
 
         update = action_row(
-          "Update BedrockOnLinux",
-          "Check and install launcher backend updates.",
+          "Update GDK runtime",
+          "Check and install runtime updates.",
           "Check"
         ) { run_simple("Backend update", ["update"]) }
         tools.add(update)
@@ -616,7 +606,6 @@ module BedrockLinuxGdk
         @current_session = session
         environment = session.environment(ENV.to_h)
         @paths = Paths.new(
-          flatpak: @backend.flatpak?,
           environment: environment
         )
         @settings = Settings.for(@paths)
@@ -676,8 +665,8 @@ module BedrockLinuxGdk
         unless @backend.available?
           Dialogs.error(
             @widget,
-            "BedrockOnLinux is not installed",
-            "Install the BedrockOnLinux backend first, then reopen this client."
+            "GDK runtime is not installed",
+            "Install a compatible GDK runtime, then reopen this client."
           )
           return
         end
@@ -693,8 +682,8 @@ module BedrockLinuxGdk
         append_log("› Launching Minecraft · #{session.name}")
         refresh_install_state
         refresh_sessions
-        command = @backend.command(["play"])
         environment = session.environment(HostEnvironment.values)
+        command = @backend.command(["play"])
 
         job.start(
           command,
@@ -704,20 +693,19 @@ module BedrockLinuxGdk
               false
             end
           },
-          ->(status : Process::Status?, error : String?) {
+          ->(exit_code : Int32?, error : String?) {
             GLib.idle_add do
               @launch_jobs.delete(session.key)
               refresh_sessions
-              success = !!status.try(&.success?) && error.nil?
+              success = exit_code == 0 && error.nil?
               if error
                 append_log("[#{session.name}] error: #{error}")
               elsif success
                 append_log("✓ #{session.name} session ended")
               else
-                code = status.try(&.exit_code)
                 append_log(
                   "error: #{session.name} session failed" \
-                  "#{code ? " (#{code})" : ""}"
+                  "#{exit_code ? " (#{exit_code})" : ""}"
                 )
               end
               refresh_install_state if @current_session.key == session.key
@@ -821,16 +809,16 @@ module BedrockLinuxGdk
         unless @backend.available?
           Dialogs.error(
             @widget,
-            "BedrockOnLinux is not installed",
-            "Install the BedrockOnLinux backend first, then reopen this client."
+            "GDK runtime is not installed",
+            "Install a compatible GDK runtime, then reopen this client."
           )
           return
         end
         return if @job.running
 
-        command = @backend.command(arguments)
         session = @current_session
         environment = session.environment(HostEnvironment.values)
+        command = @backend.command(arguments)
         lines = [] of String
         append_log("› #{label} · #{session.name}")
         set_busy(true, label)
@@ -844,16 +832,18 @@ module BedrockLinuxGdk
               false
             end
           },
-          ->(status : Process::Status?, error : String?) {
-            success = !!status.try(&.success?) && error.nil?
+          ->(exit_code : Int32?, error : String?) {
+            success = exit_code == 0 && error.nil?
             GLib.idle_add do
               if error
                 append_log("error: #{error}")
               elsif success
                 append_log("✓ #{label} complete")
               else
-                code = status.try(&.exit_code)
-                append_log("error: #{label} failed#{code ? " (#{code})" : ""}")
+                append_log(
+                  "error: #{label} failed" \
+                  "#{exit_code ? " (#{exit_code})" : ""}"
+                )
               end
               set_busy(false, success ? "Ready" : "#{label} failed")
               after.try(&.call(lines, success))
@@ -936,8 +926,8 @@ module BedrockLinuxGdk
           append_log("Backend: #{@backend.label}")
           append_log("Data: #{@paths.data_dir}")
         else
-          @status_label.text = "BedrockOnLinux backend not found"
-          append_log("error: BedrockOnLinux backend not found")
+          @status_label.text = "GDK runtime not found"
+          append_log("error: GDK runtime not found")
         end
       end
     end

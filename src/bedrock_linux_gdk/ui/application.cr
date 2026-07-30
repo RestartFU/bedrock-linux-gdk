@@ -27,13 +27,6 @@ module BedrockLinuxGdk
         end
       end
 
-      # GTK owns the main loop. Yield briefly so Crystal fibers can stream
-      # backend output without adding a second event-loop model.
-      GLib.timeout(10.milliseconds) do
-        Fiber.yield
-        true
-      end
-
       application.run
     end
 

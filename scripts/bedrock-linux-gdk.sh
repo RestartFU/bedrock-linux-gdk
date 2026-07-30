@@ -1,6 +1,6 @@
 #!/bin/sh
 # Relocatable bundle launcher. Starts the bundled loader and library closure
-# without exporting LD_LIBRARY_PATH into host tools such as Flatpak.
+# without exporting LD_LIBRARY_PATH into host tools started by the launcher.
 
 set -eu
 

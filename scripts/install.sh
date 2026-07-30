@@ -53,7 +53,7 @@ ICON_DIR="$ICON_THEME/512x512/apps"
 uninstall () {
   rm -rf "$OPT"
   rm -f "$BIN" "$DESKTOP" "$ICON_DIR/$APP_ID.png"
-  say "Removed $NAME. BedrockOnLinux game data was not touched."
+  say "Removed $NAME. Minecraft and session data was not touched."
   exit 0
 }
 

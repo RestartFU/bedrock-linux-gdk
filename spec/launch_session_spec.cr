@@ -10,7 +10,13 @@ describe BedrockLinuxGdk::SessionStore do
       sessions = store.list
       sessions.size.should eq(1)
       sessions.first.key.should eq("default")
-      sessions.first.isolated.should be_false
+      sessions.first.isolated.should be_true
+      sessions.first.environment(
+        {} of String => String
+      )["BEDROCK_LINUX_GDK_HOME"]
+        .should eq(sessions.first.data_dir)
+      sessions.first.environment({} of String => String)["BOL_HOME"]
+        .should eq(sessions.first.data_dir)
     end
   end
 
@@ -24,6 +30,10 @@ describe BedrockLinuxGdk::SessionStore do
       created.key.should eq("player-two")
       created.isolated.should be_true
       File.file?(File.join(created.data_dir, "session.json")).should be_true
+      created.environment(
+        {} of String => String
+      )["BEDROCK_LINUX_GDK_HOME"]
+        .should eq(created.data_dir)
       created.environment({} of String => String)["BOL_HOME"]
         .should eq(created.data_dir)
     end
