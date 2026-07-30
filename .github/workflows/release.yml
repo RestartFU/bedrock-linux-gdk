@@ -5,9 +5,19 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing tag to publish
+      bump:
+        description: "Semantic version increment: patch 0.0.1, minor 0.1.0, major 1.0.0"
         required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -19,7 +29,69 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Prepare release version
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            git checkout main
+            git pull --ff-only origin main
+            current=$(sed -nE \
+              's/^[[:space:]]*VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' \
+              src/bedrock_linux_gdk/version.cr)
+            recovery_tag="v$current"
+
+            if git tag --points-at HEAD | grep -Fxq "$recovery_tag" \
+              && ! gh release view "$recovery_tag" >/dev/null 2>&1; then
+              version="$current"
+              tag="$recovery_tag"
+              echo "Retrying unfinished $tag release."
+            else
+              version=$(./scripts/bump-version.sh "$BUMP")
+              tag="v$version"
+
+              if git rev-parse --verify --quiet "refs/tags/$tag"; then
+                echo "::error::Tag $tag already exists."
+                exit 1
+              fi
+
+              git config user.name "github-actions[bot]"
+              git config user.email \
+                "41898282+github-actions[bot]@users.noreply.github.com"
+              git add \
+                src/bedrock_linux_gdk/version.cr \
+                shard.yml \
+                data/com.restartfu.BedrockLinuxGdk.metainfo.xml
+              git commit -m "chore: release $tag"
+              git tag -a "$tag" -m "Bedrock Linux GDK $tag"
+            fi
+          else
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+            source_version=$(sed -nE \
+              's/^[[:space:]]*VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' \
+              src/bedrock_linux_gdk/version.cr)
+
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release tag must look like v1.2.3."
+              exit 1
+            fi
+            if [[ "$version" != "$source_version" ]]; then
+              echo "::error::$tag does not match source version $source_version."
+              exit 1
+            fi
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Run Crystal specs in Docker
         run: ./scripts/test.sh
@@ -35,12 +107,18 @@ jobs:
           sha256sum bedrock-linux-gdk-linux-x86_64.tar.gz \
             > bedrock-linux-gdk-linux-x86_64.tar.gz.sha256
 
+      - name: Publish release commit and tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: git push origin HEAD:main "$TAG"
+
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
+          tag="${{ steps.release.outputs.tag }}"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" --clobber \
               bedrock-linux-gdk-linux-x86_64.tar.gz \
