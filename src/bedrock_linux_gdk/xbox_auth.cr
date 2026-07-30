@@ -93,6 +93,14 @@ module BedrockLinuxGdk
       File.join(root, "auth", "xbox-session.json")
     end
 
+    def oauth_path(root : String) : String
+      File.join(root, "auth", "oauth-session")
+    end
+
+    def bridge_path(root : String) : String
+      File.join(root, "auth", "xbox-bridge-session")
+    end
+
     def seed_refresh_token(root : String, token : String) : Nil
       raise "Microsoft refresh token is invalid." if token.empty? ||
                                                      token.includes?('\0') ||
@@ -134,7 +142,21 @@ module BedrockLinuxGdk
     private def store_session(root : String, token : JSON::Any) : Session
       refresh_token = required_string(token, "refresh_token")
       access_token = required_string(token, "access_token")
-      payload = build_preauth(root, access_token)
+      expires_in = optional_i64(token, "expires_in") || 3600_i64
+      raise "Microsoft authentication returned an invalid expiration." if expires_in <= 0
+      payload = build_preauth(
+        root,
+        access_token,
+        refresh_token,
+        Time.utc.to_unix + expires_in
+      )
+      write_oauth_session(
+        root,
+        access_token,
+        refresh_token,
+        Time.utc.to_unix + expires_in
+      )
+      write_bridge_session(root, payload)
       user_id = required_string(payload, "xbl_xuid")
       gamertag = optional_string(payload, "xbl_gamertag") || ""
 
@@ -149,7 +171,69 @@ module BedrockLinuxGdk
       Session.new(refresh_token, user_id, gamertag)
     end
 
-    private def build_preauth(root : String, access_token : String) : JSON::Any
+    private def write_oauth_session(
+      root : String,
+      access_token : String,
+      refresh_token : String,
+      expiry : Int64,
+    ) : Nil
+      values = {access_token, refresh_token}
+      raise "Microsoft authentication returned invalid credentials." if values.any? do |value|
+        value.empty? || value.includes?('\0') || value.includes?('\n') ||
+          value.includes?('\r')
+      end
+      path = oauth_path(root)
+      temporary = "#{path}.tmp"
+      Dir.mkdir_p(File.dirname(path), 0o700)
+      File.write(
+        temporary,
+        "#{expiry}\n#{access_token}\n#{refresh_token}\n",
+        perm: 0o600
+      )
+      File.rename(temporary, path)
+    ensure
+      File.delete(temporary) if temporary && File.file?(temporary)
+    end
+
+    private def write_bridge_session(root : String, payload : JSON::Any) : Nil
+      privileges = payload.as_h.has_key?("xbl_privileges") ? "1" : "0"
+      fields = %w(
+        user_token xbl_token xbl_xuid xbl_gamertag xbl_modern_gamertag
+        xbl_modern_gamertag_suffix xbl_unique_modern_gamertag xbl_age_group
+        xbl_uhs xbl_privileges user_token_expiry_epoch xbl_token_expiry_epoch
+        sisu_token sisu_uhs sisu_rp sisu_expiry_epoch
+        mp_token mp_uhs mp_rp mp_expiry_epoch
+        realms_token realms_uhs realms_rp realms_expiry_epoch
+        lic_token lic_uhs lic_rp lic_expiry_epoch
+      ).map { |name| optional_string(payload, name).to_s }
+      fields.insert(9, privileges)
+      fields.each do |value|
+        raise "Xbox authentication returned invalid credentials." if
+          value.includes?('\0') || value.bytesize > UInt32::MAX
+      end
+
+      path = bridge_path(root)
+      temporary = "#{path}.tmp"
+      Dir.mkdir_p(File.dirname(path), 0o700)
+      File.open(temporary, "wb", perm: 0o600) do |file|
+        file << "BLGDKXB1"
+        file.write_bytes(fields.size.to_u32, IO::ByteFormat::LittleEndian)
+        fields.each do |value|
+          file.write_bytes(value.bytesize.to_u32, IO::ByteFormat::LittleEndian)
+          file << value
+        end
+      end
+      File.rename(temporary, path)
+    ensure
+      File.delete(temporary) if temporary && File.file?(temporary)
+    end
+
+    private def build_preauth(
+      root : String,
+      access_token : String,
+      refresh_token : String,
+      oauth_expiry : Int64,
+    ) : JSON::Any
       auth_dir = File.join(root, "auth")
       Dir.mkdir_p(auth_dir, 0o700)
       key_path = File.join(auth_dir, "device-key.pem")
@@ -251,6 +335,9 @@ module BedrockLinuxGdk
       end
 
       fields = {} of String => String
+      fields["oauth_token"] = access_token
+      fields["refresh_token"] = refresh_token
+      fields["oauth_expiry_epoch"] = oauth_expiry.to_s
       fields["device_id"] = device_id
       fields["ecc_private_blob_b64"] = Base64.strict_encode(
         ecc_private_blob(public_x, public_y, private_d)
@@ -299,6 +386,7 @@ module BedrockLinuxGdk
       fields["obtained"] = Time.utc.to_unix.to_s
 
       required = %w(
+        oauth_token refresh_token oauth_expiry_epoch
         device_token user_token xbl_token xbl_xuid xbl_uhs
         sisu_token sisu_uhs mp_token mp_uhs realms_token realms_uhs
       )
@@ -470,11 +558,11 @@ module BedrockLinuxGdk
 
     private def cache_valid?(payload : JSON::Any) : Bool
       %w(
-        device_token user_token xbl_token xbl_xuid
+        oauth_token refresh_token device_token user_token xbl_token xbl_xuid
         sisu_token mp_token realms_token
       ).all? { |field| !optional_string(payload, field).to_s.empty? } &&
         %w(
-          device_token_expiry_epoch user_token_expiry_epoch
+          oauth_expiry_epoch device_token_expiry_epoch user_token_expiry_epoch
           xbl_token_expiry_epoch sisu_token_expiry_epoch
           mp_token_expiry_epoch realms_token_expiry_epoch
         ).all? do |field|

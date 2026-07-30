@@ -26,6 +26,9 @@ RUN git init \
  && git fetch --depth=1 origin 75637b674e1f191e65753663c4c0c32bea05ba6e \
  && test "$(git rev-parse FETCH_HEAD)" = 75637b674e1f191e65753663c4c0c32bea05ba6e \
  && git checkout --detach FETCH_HEAD
+COPY patches/winegdk-xbox-bridge.patch /tmp/winegdk-xbox-bridge.patch
+RUN git apply --unidiff-zero --check /tmp/winegdk-xbox-bridge.patch \
+ && git apply --unidiff-zero /tmp/winegdk-xbox-bridge.patch
 
 WORKDIR /build
 RUN /source/configure \

@@ -1,6 +1,14 @@
 require "./spec_helper"
 
 describe BedrockLinuxGdk::XboxAuth do
+  it "keeps private handoff files inside the selected session" do
+    root = "/profiles/player-two"
+    BedrockLinuxGdk::XboxAuth.oauth_path(root)
+      .should eq("/profiles/player-two/auth/oauth-session")
+    BedrockLinuxGdk::XboxAuth.bridge_path(root)
+      .should eq("/profiles/player-two/auth/xbox-bridge-session")
+  end
+
   it "seeds and replaces a per-session Wine refresh token" do
     with_temp_dir("bedrock-xbox-auth") do |root|
       prefix = File.join(root, "compatdata", "pfx")
@@ -23,6 +31,12 @@ describe BedrockLinuxGdk::XboxAuth do
       second.should contain("\"RefreshToken\"=\"second-token\"\n")
       second.should_not contain("first-token")
       second.scan("\"RefreshToken\"=").size.should eq(1)
+    end
+  end
+
+  it "rejects refresh tokens that could corrupt the Wine registry" do
+    expect_raises(Exception, "Microsoft refresh token is invalid.") do
+      BedrockLinuxGdk::XboxAuth.seed_refresh_token("/tmp/profile", "bad\nvalue")
     end
   end
 end

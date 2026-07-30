@@ -264,21 +264,27 @@ module BedrockLinuxGdk
 
       environment = compatibility_environment(engine)
       environment["WINEGDK_PREAUTH_DEVICE"] = wine_path(
-        XboxAuth.preauth_path(root)
+        XboxAuth.bridge_path(root)
+      )
+      environment["WINEGDK_PREAUTH_OAUTH"] = wine_path(
+        XboxAuth.oauth_path(root)
       )
       environment["WINEDLLOVERRIDES"] =
         "xgameruntime=n,b;cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64="
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_SHOWUI"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_FAILFAST"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_DEPLOYMENT_INITIALIZE_ONERRORSHOWUI"] = "0"
+      environment["VKD3D_CONFIG"] = merge_option(
+        environment["VKD3D_CONFIG"]?,
+        "force_raw_va_cbv"
+      )
+      ensure_stack_reserve(game)
       info("Starting Minecraft.")
-      status = Process.run(
+      status = run_compatibility(
         umu,
         [File.join(game, "Minecraft.Windows.exe")],
-        env: environment,
-        chdir: game,
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        environment,
+        chdir: game
       )
       status.exit_code
     end
@@ -423,6 +429,7 @@ module BedrockLinuxGdk
     end
 
     private def patch_compatibility_engine(engine : String) : Nil
+      patch_proton_launcher(engine)
       wine = File.join(engine, "files", "lib", "wine", "x86_64-windows")
       patch_export(
         File.join(wine, "combase.dll"),
@@ -435,6 +442,47 @@ module BedrockLinuxGdk
         Bytes[0xb8, 0x02, 0x00, 0x00, 0xc0, 0xc3],
         required: false
       )
+    end
+
+    private def patch_proton_launcher(engine : String) : Nil
+      path = File.join(engine, "proton")
+      raise "GDK-Proton launcher is missing." unless File.file?(path)
+
+      source = File.read(path)
+      return if source.includes?(
+        "Executable a unix path, launching directly."
+      )
+
+      lines = source.lines(chomp: false)
+      message = lines.index do |line|
+        line.includes?(
+          "Executable a unix path, launching with /unix option."
+        )
+      end
+      command = message.try do |index|
+        ((index + 1)...lines.size).find do |candidate|
+          line = lines[candidate]
+          line.includes?("start.exe") && line.includes?("\"/unix\"")
+        end
+      end
+      raise "Unsupported GDK-Proton launcher." unless message && command
+
+      indent = lines[command].byte_slice(
+        0,
+        lines[command].index(/\S/) || 0
+      )
+      lines[message] = lines[message].sub(
+        "launching with /unix option",
+        "launching directly"
+      )
+      lines[command] =
+        %(#{indent}sys.argv[2] = "Z:" + sys.argv[2].replace("/", chr(92))\n) \
+        %(#{indent}argv = [g_proton.wine64_bin]\n)
+
+      backup = "#{path}.gdk-original"
+      File.copy(path, backup) unless File.file?(backup)
+      File.write(path, lines.join)
+      ok("GDK-Proton direct launch fix applied.")
     end
 
     private def patch_export(
@@ -541,18 +589,50 @@ module BedrockLinuxGdk
         (bytes[offset + 3].to_u32 << 24)
     end
 
+    private def ensure_stack_reserve(game : String) : Nil
+      executable = File.join(game, "Minecraft.Windows.exe")
+      header = Bytes.new(0x400)
+      read = File.open(executable, "rb") do |file|
+        file.read(header)
+      end
+      return if read < 0x100 || header[0, 2] != Bytes[0x4d, 0x5a]
+
+      pe = read_u32(header, 0x3c).to_i
+      optional = pe + 24
+      field = optional + 72
+      return if field + 8 > read ||
+                header[pe, 4] != Bytes[0x50, 0x45, 0x00, 0x00] ||
+                read_u16(header, optional) != 0x20b
+
+      current = IO::ByteFormat::LittleEndian.decode(UInt64, header[field, 8])
+      target = 16_u64 * 1024 * 1024
+      return if current >= target
+
+      File.open(executable, "r+b") do |file|
+        file.seek(field)
+        file.write_bytes(target, IO::ByteFormat::LittleEndian)
+      end
+      ok("Minecraft stack reserve fix applied.")
+    rescue File::Error
+      warn("Could not apply the Minecraft stack reserve fix.")
+    end
+
+    private def merge_option(current : String?, required : String) : String
+      values = current.to_s.split(',').map(&.strip).reject(&.empty?)
+      values << required unless values.includes?(required)
+      values.join(',')
+    end
+
     private def ensure_prefix(umu : String, engine : String) : Nil
       prefix = File.join(root, "compatdata", "pfx")
       return if File.file?(File.join(prefix, "system.reg"))
 
       Dir.mkdir_p(File.dirname(prefix), 0o700)
       info("Initialising compatibility prefix …")
-      status = Process.run(
+      status = run_compatibility(
         umu,
         ["wineboot", "-u"],
-        env: compatibility_environment(engine),
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        compatibility_environment(engine)
       )
       raise "Compatibility prefix initialisation failed." unless status.success?
       raise "Compatibility prefix is incomplete." unless File.file?(File.join(prefix, "system.reg"))
@@ -591,15 +671,13 @@ module BedrockLinuxGdk
       end
 
       info("Installing Microsoft GameInput …")
-      status = Process.run(
+      status = run_compatibility(
         umu,
         [
           "msiexec.exe", "/i", wine_path(installer),
           "/qn", "/norestart",
         ],
-        env: compatibility_environment(engine),
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        compatibility_environment(engine)
       )
       unless status.success? || status.exit_code == 194
         raise "Microsoft GameInput installation failed."
@@ -657,6 +735,27 @@ module BedrockLinuxGdk
 
     private def wine_path(path : String) : String
       "Z:#{File.expand_path(path).gsub('/', '\\')}"
+    end
+
+    private def run_compatibility(
+      command : String,
+      arguments : Array(String),
+      environment : Hash(String, String),
+      chdir : String? = nil,
+    ) : Process::Status
+      File.open("/dev/null", "r") do |input|
+        File.open("/dev/null", "w") do |output|
+          Process.run(
+            command,
+            arguments,
+            env: environment,
+            chdir: chdir,
+            input: input,
+            output: output,
+            error: output
+          )
+        end
+      end
     end
 
     private def compatibility_environment(engine : String) : Hash(String, String)
