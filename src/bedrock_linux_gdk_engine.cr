@@ -3,6 +3,7 @@ require "http/client"
 require "json"
 require "file_utils"
 require "./bedrock_linux_gdk/version"
+require "./bedrock_linux_gdk/xbox_auth"
 
 module BedrockLinuxGdk
   module Engine
@@ -258,10 +259,15 @@ module BedrockLinuxGdk
       raise "Wine prefix missing — run Install / Update." unless File.file?(File.join(prefix, "system.reg"))
       raise "No Microsoft account linked — click Sign in first." unless account_linked?
       ensure_runtime_bridge(engine)
+      auth = XboxAuth.refresh(root)
+      XboxAuth.seed_refresh_token(root, auth.refresh_token)
 
       environment = compatibility_environment(engine)
+      environment["WINEGDK_PREAUTH_DEVICE"] = wine_path(
+        XboxAuth.preauth_path(root)
+      )
       environment["WINEDLLOVERRIDES"] =
-        "cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64="
+        "xgameruntime=n,b;cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64="
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_SHOWUI"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_FAILFAST"] = "0"
       environment["MICROSOFT_WINDOWSAPPRUNTIME_DEPLOYMENT_INITIALIZE_ONERRORSHOWUI"] = "0"
@@ -282,83 +288,26 @@ module BedrockLinuxGdk
              raise "Install Minecraft before signing in."
       engine = proton ||
                raise "Compatibility engine missing — run Install / Update."
-      umu = umu_command || raise "umu-run is missing."
       prefix = File.join(root, "compatdata", "pfx")
       raise "Wine prefix missing — run Install / Update." unless File.file?(File.join(prefix, "system.reg"))
 
       ensure_runtime_bridge(engine)
-      helper = File.join(game, "bedrock-linux-gdk-auth.exe")
-      File.copy(runtime_asset("bedrock-linux-gdk-auth.exe"), helper)
-      File.chmod(helper, 0o755)
-
-      auth_dir = File.join(root, "auth")
-      result = File.join(auth_dir, "events.log")
-      Dir.mkdir_p(auth_dir, 0o700)
-      File.write(result, "", perm: 0o600)
-
-      environment = compatibility_environment(engine)
-      environment["PROTON_VERB"] = "waitforexitandrun"
-      environment["PROTON_ENABLE_WAYLAND"] = "0"
-      environment["BEDROCK_LINUX_GDK_AUTH_RESULT"] = wine_path(result)
-      environment["WINEDLLOVERRIDES"] =
-        "cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64="
-
-      process_error = nil.as(String?)
-      finished = Channel(Nil).new(1)
-      spawn do
-        begin
-          Process.run(
-            umu,
-            [helper],
-            env: environment,
-            chdir: game,
-            output: Process::Redirect::Close,
-            error: Process::Redirect::Close
-          )
-        rescue exception
-          process_error = exception.message || exception.class.name
-        ensure
-          finished.send(nil)
-        end
+      account = XboxAuth.sign_in(root) do |url, code|
+        puts "device\t#{url}\t#{code}"
       end
-
-      seen = 0
-      loop do
-        lines = auth_event_lines(result)
-        lines[seen..]?.try(&.each { |line| puts line })
-        seen = lines.size
-        select
-        when finished.receive
-          lines = auth_event_lines(result)
-          lines[seen..]?.try(&.each { |line| puts line })
-          break
-        when timeout(250.milliseconds)
-        end
-      end
-
-      raise process_error.not_nil! if process_error
-      account = auth_event_lines(result)
-        .reverse
-        .find(&.starts_with?("account\t"))
-      unless account
-        failure = auth_event_lines(result)
-          .reverse
-          .find(&.starts_with?("error\t"))
-        detail = failure ? failure.split('\t').last? : nil
-        raise "Microsoft sign-in failed#{detail ? " (#{detail})" : ""}."
-      end
-
-      parts = account.split('\t', 3)
-      raise "Microsoft sign-in returned an invalid account." unless parts.size == 3
+      XboxAuth.seed_refresh_token(root, account.refresh_token)
       write_json(
         File.join(root, "account.json"),
         JSON.parse({
-          "user_id"   => parts[1],
-          "gamertag"  => parts[2],
+          "user_id"   => account.user_id,
+          "gamertag"  => account.gamertag,
           "linked_at" => Time.utc.to_unix,
         }.to_json)
       )
-      ok("Microsoft account linked#{parts[2].empty? ? "" : " as #{parts[2]}"}.")
+      ok(
+        "Microsoft account linked" \
+        "#{account.gamertag.empty? ? "" : " as #{account.gamertag}"}."
+      )
       0
     end
 
@@ -624,7 +573,7 @@ module BedrockLinuxGdk
       return if File.file?(installed)
 
       archive = File.join(
-        root,
+        shared_root,
         "cache",
         "Microsoft.GameInput.#{GAME_INPUT_VERSION}.nupkg"
       )
@@ -704,12 +653,6 @@ module BedrockLinuxGdk
       Dir.mkdir_p(File.dirname(target), 0o700)
       File.copy(source, target)
       true
-    end
-
-    private def auth_event_lines(path : String) : Array(String)
-      File.read_lines(path).map(&.strip).reject(&.empty?)
-    rescue File::Error
-      [] of String
     end
 
     private def wine_path(path : String) : String

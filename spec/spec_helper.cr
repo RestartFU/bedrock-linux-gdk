@@ -9,6 +9,7 @@ require "../src/bedrock_linux_gdk/paths"
 require "../src/bedrock_linux_gdk/settings"
 require "../src/bedrock_linux_gdk/update_channel"
 require "../src/bedrock_linux_gdk/version_entry"
+require "../src/bedrock_linux_gdk/xbox_auth"
 
 def with_temp_dir(prefix : String, & : String ->) : Nil
   directory = File.join(

@@ -20,6 +20,9 @@ install -Dm755 \
 install -Dm755 \
   "$stage/usr/bin/bedrock-linux-gdk-engine" \
   "$out/bin/bedrock-linux-gdk-engine"
+install -Dm755 \
+  "$stage/usr/bin/openssl" \
+  "$out/bin/openssl"
 mkdir -p "$out/libexec/bedrock-linux-gdk"
 cp -a \
   "$stage/usr/libexec/bedrock-linux-gdk/." \
@@ -37,6 +40,7 @@ query_loaders=$(command -v gdk-pixbuf-query-loaders \
 mapfile -t roots < <(printf '%s\n' \
   "$out/bin/bedrock-linux-gdk" \
   "$out/bin/bedrock-linux-gdk-engine" \
+  "$out/bin/openssl" \
   "$out/lib/ossl-modules"/*.so \
   "$out/lib/gdk-pixbuf-2.0/loaders"/*.so \
   "$arch_dir"/libnss_files.so.2 \

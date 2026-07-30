@@ -23,8 +23,8 @@ RUN apt-get update \
 WORKDIR /source
 RUN git init \
  && git remote add origin https://github.com/LukasPAH/WineGDK.git \
- && git fetch --depth=1 origin refs/heads/rebased-minimal-xbl \
- && test "$(git rev-parse FETCH_HEAD)" = ae946f453977d2229d7850168991743dbdd04d85 \
+ && git fetch --depth=1 origin 75637b674e1f191e65753663c4c0c32bea05ba6e \
+ && test "$(git rev-parse FETCH_HEAD)" = 75637b674e1f191e65753663c4c0c32bea05ba6e \
  && git checkout --detach FETCH_HEAD
 
 WORKDIR /build
@@ -51,12 +51,7 @@ RUN /source/configure \
       --without-x \
  && make -j2 dlls/xgameruntime/x86_64-windows/xgameruntime.dll
 
-COPY runtime/auth_bridge.c /runtime/auth_bridge.c
 RUN mkdir -p /runtime/out \
- && x86_64-w64-mingw32-gcc \
-      -O2 -s -Wall -Wextra -Wno-cast-function-type \
-      -o /runtime/out/bedrock-linux-gdk-auth.exe \
-      /runtime/auth_bridge.c \
  && install -m0644 \
       /build/dlls/xgameruntime/x86_64-windows/xgameruntime.dll \
       /runtime/out/xgameruntime.dll \
@@ -146,6 +141,7 @@ COPY --from=crystal /crystal-build/bedrock-linux-gdk-engine /stage/usr/bin/bedro
 COPY --from=winegdk-runtime /runtime/out /stage/usr/libexec/bedrock-linux-gdk
 
 RUN set -eux; \
+    install -m0755 /usr/bin/openssl /stage/usr/bin/openssl; \
     test "$PROFILE" = default || test "$PROFILE" = nightly; \
     if [ "$PROFILE" = nightly ]; then \
       app_id=com.restartfu.BedrockLinuxGdk.Nightly; \

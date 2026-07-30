@@ -28,7 +28,9 @@ independently testable.
 - Fail-fast Play pipeline: system checks run before downloads; account checks
   run before launch
 - First-party Crystal install, update and launch engine
-- Launcher-only Xbox sign-in; Minecraft never opens for authentication
+- Crystal-owned Microsoft/Xbox sign-in; Minecraft never opens for
+  authentication
+- Per-session refresh tokens and Xbox service credentials, renewed before play
 - System, network and Wine-prefix diagnostics
 - Live activity output with cancellation
 - Automatic official UMU and GDK-Proton setup
