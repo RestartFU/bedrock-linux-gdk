@@ -1,5 +1,6 @@
 require "gtk4"
 require "./adw"
+require "./pointer_cursors"
 
 module BedrockLinuxGdk
   module UI
@@ -12,6 +13,7 @@ module BedrockLinuxGdk
         dialog.default_response = "close"
         dialog.close_response = "close"
         dialog.present(parent)
+        install_pointer_cursors
       end
 
       def confirm(
@@ -29,6 +31,14 @@ module BedrockLinuxGdk
         dialog.close_response = "cancel"
         dialog.choose(parent, nil) do |_source, result|
           on_accept.call if dialog.choose_finish(result) == "accept"
+        end
+        install_pointer_cursors
+      end
+
+      private def install_pointer_cursors : Nil
+        GLib.idle_add do
+          PointerCursors.apply_all
+          false
         end
       end
     end

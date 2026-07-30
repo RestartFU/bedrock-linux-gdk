@@ -22,13 +22,15 @@ testable.
 - Stable and preview Minecraft version picker
 - Install, update and launch workflows
 - Microsoft sign-in status and login
+- Account manager for adding and switching isolated Microsoft accounts
 - Independent concurrent sessions with separate accounts, prefixes, worlds
   and game files
+- Fail-fast Play pipeline: sign-in and system checks run before downloads
 - Compatible GDK runtime settings editor
 - System, network and Wine-prefix diagnostics
 - Live activity output with cancellation
 - Native runtime discovery
-- Original simplified portal-stack app icon
+- Original voxel grass-block app icon
 
 Concurrent sessions intentionally use separate game data roots. Independent
 roots cost more disk space, but prevent account, prefix, world and runtime-lock

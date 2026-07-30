@@ -10,6 +10,7 @@ require "../version"
 require "../version_entry"
 require "./adw"
 require "./dialogs"
+require "./pointer_cursors"
 require "./updater"
 
 module BedrockLinuxGdk
@@ -94,7 +95,7 @@ module BedrockLinuxGdk
         @account_button = Gtk::Button.new_with_label("Sign in")
         @account_button.add_css_class("flat")
         @account_button.add_css_class("bol-account")
-        @account_button.clicked_signal.connect { account_clicked }
+        @account_button.clicked_signal.connect { show_account_manager }
 
         @session_entry = Gtk::Entry.new
         @sessions_output = Gtk::Label.new("")
@@ -102,6 +103,7 @@ module BedrockLinuxGdk
         build_pages
         @updater = Updater.new(@widget, ->(line : String) { append_log(line) })
         @widget.content = build_shell
+        PointerCursors.apply(@widget)
         @widget.close_request_signal.connect do
           @updater.close
           false
@@ -671,6 +673,31 @@ module BedrockLinuxGdk
           return
         end
 
+        version = selected_version
+        unless version
+          Dialogs.error(
+            @widget,
+            "Minecraft versions are still loading",
+            "Wait for the version list, then press Play again."
+          )
+          return
+        end
+
+        unless AccountState.read(@paths).signed_in
+          @status_label.text = "Sign in before installing or playing."
+          show_account_manager
+          return
+        end
+
+        unless version_installed?(version.tag)
+          preflight_install(version, launch_after: true)
+          return
+        end
+
+        launch_current_session
+      end
+
+      private def launch_current_session : Nil
         session = @current_session
         if @launch_jobs[session.key]?.try(&.running)
           append_log("#{session.name} is already running.")
@@ -717,16 +744,78 @@ module BedrockLinuxGdk
       end
 
       private def setup : Nil
-        version = @versions[@version_row.selected.to_i]?
-        args = ["setup"]
-        if version
-          args << "--mc"
-          args << version.tag
+        version = selected_version
+        unless version
+          Dialogs.error(
+            @widget,
+            "Minecraft versions are still loading",
+            "Wait for the version list, then try again."
+          )
+          return
         end
-        run_simple("Installing Minecraft", args)
+
+        unless AccountState.read(@paths).signed_in
+          @status_label.text = "Sign in before installing Minecraft."
+          show_account_manager
+          return
+        end
+
+        preflight_install(version, launch_after: false)
       end
 
-      private def account_clicked : Nil
+      private def preflight_install(
+        version : VersionEntry,
+        launch_after : Bool,
+      ) : Nil
+        run_operation(
+          "Checking system requirements",
+          ["doctor"],
+          ->(_lines : Array(String), healthy : Bool) {
+            if healthy
+              run_operation(
+                "Installing Minecraft",
+                ["setup", "--mc", version.tag],
+                ->(_setup_lines : Array(String), installed : Bool) {
+                  if installed
+                    mark_version_installed(version.tag)
+                    refresh_install_state
+                    launch_current_session if launch_after
+                  end
+                }
+              )
+            else
+              Dialogs.error(
+                @widget,
+                "System check failed",
+                "Nothing was downloaded. Fix the reported requirements, " \
+                "then try again."
+              )
+            end
+          }
+        )
+      end
+
+      private def selected_version : VersionEntry?
+        @versions[@version_row.selected.to_i]?
+      end
+
+      private def version_installed?(version : String) : Bool
+        File.directory?(File.join(@paths.games_dir, version)) &&
+          File.file?(setup_marker(version))
+      end
+
+      private def setup_marker(version : String) : String
+        File.join(@paths.data_dir, ".setup-complete-#{version}")
+      end
+
+      private def mark_version_installed(version : String) : Nil
+        Dir.mkdir_p(@paths.data_dir, 0o700)
+        File.write(setup_marker(version), "#{Time.utc}\n", perm: 0o600)
+      rescue error : File::Error
+        append_log("warn: could not write setup marker: #{error.message}")
+      end
+
+      private def start_sign_in : Nil
         state = AccountState.read(@paths)
         if state.signed_in
           append_log("Microsoft account already linked.")
@@ -739,6 +828,137 @@ module BedrockLinuxGdk
             refresh_account
           }
         )
+      end
+
+      private def show_account_manager : Nil
+        dialog = Adw::Dialog.new(
+          title: "Accounts",
+          content_width: 560,
+          content_height: 520
+        )
+
+        header = Adw::HeaderBar.new
+        header.title_widget = Adw::WindowTitle.new(
+          title: "Accounts",
+          subtitle: "Independent Microsoft account profiles"
+        )
+
+        list = Gtk::ListBox.new
+        list.selection_mode = :none
+        list.add_css_class("boxed-list")
+
+        @sessions.each do |session|
+          paths = Paths.new(
+            environment: session.environment(ENV.to_h)
+          )
+          account = AccountState.read(paths)
+          current = session.key == @current_session.key
+
+          row = Adw::ActionRow.new
+          row.title = session.name
+          row.subtitle = if account.signed_in
+                           account.gamertag || "Microsoft account linked"
+                         else
+                           "Not signed in"
+                         end
+
+          action = Gtk::Button.new_with_label(
+            if current && account.signed_in
+              "Current"
+            elsif account.signed_in
+              "Use"
+            else
+              "Sign in"
+            end
+          )
+          action.sensitive = !(current && account.signed_in)
+          action.add_css_class("suggested-action") unless account.signed_in
+          action.clicked_signal.connect do
+            select_session(session.key)
+            dialog.close
+            start_sign_in unless account.signed_in
+          end
+          row.add_suffix(action)
+          row.activatable_widget = action
+          list.append(row)
+        end
+
+        account_name = Gtk::Entry.new
+        account_name.placeholder_text = "New account profile name"
+        account_name.hexpand = true
+
+        add = Gtk::Button.new_with_label("Add & Sign in")
+        add.add_css_class("suggested-action")
+        add.clicked_signal.connect do
+          name = account_name.text.strip
+          unless name.empty?
+            begin
+              previous_version = @settings.string("mc_version")
+              session = @session_store.create(name)
+              unless previous_version.empty?
+                Settings.new(File.join(session.data_dir, "settings.json"))
+                  .set("mc_version", previous_version)
+              end
+              reload_sessions(selected_key: session.key)
+              dialog.close
+              start_sign_in
+            rescue error : ArgumentError | File::Error
+              Dialogs.error(
+                @widget,
+                "Could not add account",
+                error.message || error.class.name
+              )
+            end
+          end
+        end
+
+        add_row = Gtk::Box.new(:horizontal, 8)
+        add_row.append(account_name)
+        add_row.append(add)
+
+        note = Gtk::Label.new(
+          "Each account profile keeps separate credentials, worlds, game " \
+          "files and Wine prefix."
+        )
+        note.wrap = true
+        note.xalign = 0_f32
+        note.add_css_class("dim-label")
+
+        content = Gtk::Box.new(:vertical, 16)
+        content.margin_top = 18
+        content.margin_bottom = 18
+        content.margin_start = 18
+        content.margin_end = 18
+        content.append(list)
+        content.append(add_row)
+        content.append(note)
+
+        scroller = Gtk::ScrolledWindow.new
+        scroller.hscrollbar_policy = :never
+        scroller.vscrollbar_policy = :automatic
+        scroller.child = content
+
+        toolbar = Adw::ToolbarView.new
+        toolbar.add_top_bar(header)
+        toolbar.content = scroller
+        dialog.child = toolbar
+        dialog.present(@widget)
+
+        GLib.idle_add do
+          PointerCursors.apply_all
+          false
+        end
+      end
+
+      private def select_session(key : String) : Nil
+        selected = @sessions.index(&.key.==(key))
+        return unless selected
+
+        if @session_row.selected == selected.to_u32
+          session_selected
+        else
+          @session_row.selected = selected.to_u32
+        end
       end
 
       private def create_session : Nil
@@ -896,8 +1116,7 @@ module BedrockLinuxGdk
 
       private def refresh_install_state : Nil
         version = @settings.string("mc_version")
-        installed = !version.empty? &&
-                    File.directory?(File.join(@paths.games_dir, version))
+        installed = !version.empty? && version_installed?(version)
         running = @launch_jobs[@current_session.key]?.try(&.running) || false
         @play_button.label = running ? "Running" : "Play"
         @play_button.sensitive =

@@ -2,6 +2,7 @@ require "gtk4"
 require "../host_environment"
 require "../update_channel"
 require "../version"
+require "./pointer_cursors"
 
 module BedrockLinuxGdk
   module UI
@@ -27,6 +28,7 @@ module BedrockLinuxGdk
         @check_id = 0_u32
 
         @widget = Gtk::Button.new_from_icon_name("view-refresh-symbolic")
+        @widget.cursor_from_name = "pointer"
         @widget.add_css_class("flat")
         @widget.tooltip_text = "Check for client updates"
         @widget.clicked_signal.connect { clicked }
