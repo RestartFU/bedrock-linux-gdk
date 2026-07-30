@@ -1,0 +1,6 @@
+.git
+.shards
+bin
+build
+dist
+lib

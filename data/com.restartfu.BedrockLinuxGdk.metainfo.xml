@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.restartfu.BedrockLinuxGdk</id>
+  <name>Bedrock Linux GDK</name>
+  <summary>Native GTK launcher for Minecraft Bedrock Windows GDK</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      Bedrock Linux GDK is a Crystal, GTK4 and libadwaita frontend for
+      BedrockOnLinux. It manages versions, setup, Microsoft sign-in,
+      concurrent sessions and diagnostics while retaining the reviewed
+      WineGDK backend.
+    </p>
+  </description>
+  <launchable type="desktop-id">
+    com.restartfu.BedrockLinuxGdk.desktop
+  </launchable>
+  <provides>
+    <binary>bedrock-linux-gdk</binary>
+  </provides>
+  <url type="homepage">
+    https://github.com/RestartFU/bedrock-linux-gdk
+  </url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-07-30"/>
+  </releases>
+</component>

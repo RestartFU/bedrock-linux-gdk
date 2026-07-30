@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Run Crystal specs in Docker
+        run: ./scripts/test.sh
+
+      - name: Build self-contained release bundle
+        run: ./scripts/build.sh
+
+      - name: Pack and checksum
+        run: |
+          set -euo pipefail
+          mv dist bedrock-linux-gdk
+          tar -czf bedrock-linux-gdk-linux-x86_64.tar.gz bedrock-linux-gdk
+          sha256sum bedrock-linux-gdk-linux-x86_64.tar.gz \
+            > bedrock-linux-gdk-linux-x86_64.tar.gz.sha256
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" --clobber \
+              bedrock-linux-gdk-linux-x86_64.tar.gz \
+              bedrock-linux-gdk-linux-x86_64.tar.gz.sha256 \
+              scripts/install.sh
+          else
+            gh release create "$tag" \
+              --verify-tag \
+              --generate-notes \
+              bedrock-linux-gdk-linux-x86_64.tar.gz \
+              bedrock-linux-gdk-linux-x86_64.tar.gz.sha256 \
+              scripts/install.sh
+          fi

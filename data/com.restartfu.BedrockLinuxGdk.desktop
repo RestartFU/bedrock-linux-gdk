@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Bedrock Linux GDK
+GenericName=Minecraft Bedrock Launcher
+Comment=Launch Minecraft Bedrock Windows GDK on Linux
+Exec=bedrock-linux-gdk
+Icon=com.restartfu.BedrockLinuxGdk
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=minecraft;bedrock;gdk;wine;proton;
+StartupNotify=true
+StartupWMClass=com.restartfu.BedrockLinuxGdk

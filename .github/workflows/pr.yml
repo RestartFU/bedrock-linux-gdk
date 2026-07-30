@@ -1,0 +1,27 @@
+name: pr
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Run Crystal specs in Docker
+        run: ./scripts/test.sh
+      - name: Build self-contained nightly bundle
+        run: ./scripts/build.sh --build-arg PROFILE=nightly
+      - name: Verify bundle
+        run: ./dist/bedrock-linux-gdk.sh --version

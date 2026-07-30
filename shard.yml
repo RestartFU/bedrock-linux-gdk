@@ -1,0 +1,17 @@
+name: bedrock-linux-gdk
+version: 0.1.0
+
+authors:
+  - RestartFU
+
+targets:
+  bedrock-linux-gdk:
+    main: src/bedrock_linux_gdk.cr
+
+dependencies:
+  gtk4:
+    github: hugopl/gtk4.cr
+    version: 0.18.0
+
+crystal: ">= 1.19.0"
+license: MIT

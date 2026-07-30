@@ -1,0 +1,66 @@
+name: nightly
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run Crystal specs in Docker
+        run: ./scripts/test.sh
+
+      - name: Build self-contained nightly bundle
+        run: ./scripts/build.sh --build-arg PROFILE=nightly
+
+      - name: Pack and checksum
+        run: |
+          set -euo pipefail
+          mv dist bedrock-linux-gdk-nightly
+          tar -czf bedrock-linux-gdk-nightly-linux-x86_64.tar.gz \
+            bedrock-linux-gdk-nightly
+          sha256sum bedrock-linux-gdk-nightly-linux-x86_64.tar.gz \
+            > bedrock-linux-gdk-nightly-linux-x86_64.tar.gz.sha256
+
+      - name: Publish rolling nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          subject=$(git log -1 --format=%s)
+          notes=$(cat <<EOF
+          Built from \`${GITHUB_SHA:0:7}\` — $subject
+
+          Install:
+
+          \`\`\`sh
+          curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/install.sh | sh
+          \`\`\`
+
+          Self-contained Linux x86_64 bundle. Docker-built from pinned Crystal
+          1.21 toolchain; works on glibc distributions and NixOS.
+          EOF
+          )
+
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Nightly $(date -u +%Y-%m-%d)" \
+            --notes "$notes" \
+            bedrock-linux-gdk-nightly-linux-x86_64.tar.gz \
+            bedrock-linux-gdk-nightly-linux-x86_64.tar.gz.sha256 \
+            scripts/install.sh
