@@ -4,7 +4,7 @@
 # complete GTK/libadwaita library closure and runs on glibc x86_64 systems,
 # including NixOS hosts without a conventional /lib64 loader.
 
-FROM debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd AS winegdk-runtime
+FROM debian:bullseye-slim@sha256:cba95a21c96c1f5fc2470081829363eed57706634f7dc26e8c6712934303d57a AS winegdk-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,9 +26,9 @@ RUN git init \
  && git fetch --depth=1 origin 75637b674e1f191e65753663c4c0c32bea05ba6e \
  && test "$(git rev-parse FETCH_HEAD)" = 75637b674e1f191e65753663c4c0c32bea05ba6e \
  && git checkout --detach FETCH_HEAD
-COPY patches/winegdk-xbox-bridge.patch /tmp/winegdk-xbox-bridge.patch
-RUN git apply --unidiff-zero --check /tmp/winegdk-xbox-bridge.patch \
- && git apply --unidiff-zero /tmp/winegdk-xbox-bridge.patch
+COPY patches/winegdk-launcher-auth.patch /tmp/winegdk-launcher-auth.patch
+RUN git apply --unidiff-zero --check /tmp/winegdk-launcher-auth.patch \
+ && git apply --unidiff-zero /tmp/winegdk-launcher-auth.patch
 
 WORKDIR /build
 RUN /source/configure \

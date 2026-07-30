@@ -1,0 +1,119 @@
+diff --git a/dlls/xgameruntime/GDKComponent/System/User/Token.c b/dlls/xgameruntime/GDKComponent/System/User/Token.c
+index 1e391e0203..f0d80465d9 100644
+--- a/dlls/xgameruntime/GDKComponent/System/User/Token.c
++++ b/dlls/xgameruntime/GDKComponent/System/User/Token.c
+@@ -456,0 +457,101 @@ HRESULT ParseJsonObject( LPCSTR str, UINT32 str_size, IJsonObject **object )
++static HRESULT HStringFromUtf8( LPCSTR value, HSTRING *result )
++{
++    INT length, written;
++    LPWSTR wide;
++    HRESULT hr;
++
++    if (!value || !result) return E_POINTER;
++    *result = NULL;
++    length = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
++                                  NULL, 0 );
++    if (length <= 1) return HRESULT_FROM_WIN32( GetLastError() );
++    if (!(wide = calloc( length, sizeof( *wide ) ))) return E_OUTOFMEMORY;
++    written = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
++                                   wide, length );
++    if (written != length)
++    {
++        free( wide );
++        return HRESULT_FROM_WIN32( GetLastError() );
++    }
++    hr = WindowsCreateString( wide, length - 1, result );
++    free( wide );
++    return hr;
++}
++
++static HRESULT LoadPreauthenticatedOAuth( time_t *expiry,
++                                           HSTRING *refresh_token,
++                                           HSTRING *oauth_token )
++{
++    const char *path = getenv( "WINEGDK_PREAUTH_OAUTH" );
++    HANDLE file;
++    LPSTR buffer = NULL, expiry_end, oauth, oauth_end, refresh, refresh_end;
++    DWORD size, read = 0;
++    unsigned long long parsed;
++    LPSTR end;
++    HRESULT hr = E_FAIL;
++
++    if (!path || !*path || !expiry || !refresh_token || !oauth_token)
++        return E_INVALIDARG;
++    *refresh_token = NULL;
++    *oauth_token = NULL;
++
++    file = CreateFileA( path, GENERIC_READ, FILE_SHARE_READ, NULL,
++            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
++    if (file == INVALID_HANDLE_VALUE)
++        return HRESULT_FROM_WIN32( GetLastError() );
++
++    size = GetFileSize( file, NULL );
++    if (!size || size >= 64 * 1024 ||
++        !(buffer = calloc( 1, size + 1 )) ||
++        !ReadFile( file, buffer, size, &read, NULL ) || read != size)
++        goto done;
++
++    expiry_end = strchr( buffer, '\n' );
++    oauth = expiry_end ? expiry_end + 1 : NULL;
++    oauth_end = oauth ? strchr( oauth, '\n' ) : NULL;
++    refresh = oauth_end ? oauth_end + 1 : NULL;
++    refresh_end = refresh ? strchr( refresh, '\n' ) : NULL;
++    if (!expiry_end || !oauth || !oauth_end || oauth == oauth_end ||
++        !refresh || !refresh_end || refresh == refresh_end ||
++        refresh_end[1] || strchr( buffer, '\r' ))
++        goto done;
++
++    *expiry_end = 0;
++    *oauth_end = 0;
++    *refresh_end = 0;
++    parsed = strtoull( buffer, &end, 10 );
++    if (end == buffer || *end || !parsed ||
++        parsed > 0x7fffffffffffffffULL ||
++        (time_t)parsed <= time( NULL ) + 30)
++    {
++        hr = E_FAIL;
++        goto done;
++    }
++
++    if (FAILED( hr = HStringFromUtf8( oauth, oauth_token ) ) ||
++        FAILED( hr = HStringFromUtf8( refresh, refresh_token ) ))
++        goto done;
++
++    *expiry = (time_t)parsed;
++    hr = S_OK;
++    TRACE( "loaded launcher OAuth credentials\n" );
++
++done:
++    free( buffer );
++    CloseHandle( file );
++    if (FAILED( hr ))
++    {
++        if (*refresh_token)
++        {
++            WindowsDeleteString( *refresh_token );
++            *refresh_token = NULL;
++        }
++        if (*oauth_token)
++        {
++            WindowsDeleteString( *oauth_token );
++            *oauth_token = NULL;
++        }
++    }
++    return hr;
++}
++
+@@ -468,0 +570,6 @@ HRESULT RefreshOAuth( LPCSTR client_id, LPCSTR refresh_token, time_t *new_expiry
++    *new_refresh_token = NULL;
++    *new_oauth_token = NULL;
++    hr = LoadPreauthenticatedOAuth( new_expiry, new_refresh_token,
++                                    new_oauth_token );
++    if (SUCCEEDED( hr )) return S_OK;
++    WARN( "launcher OAuth credentials unavailable: 0x%08lx\n", hr );
+diff --git a/dlls/xgameruntime/Makefile.in b/dlls/xgameruntime/Makefile.in
+index 6613fcf5ae..02122fa81e 100644
+--- a/dlls/xgameruntime/Makefile.in
++++ b/dlls/xgameruntime/Makefile.in
+@@ -2,0 +3 @@ MODULE    = xgameruntime.dll
++x86_64_EXTRADLLFLAGS = -Wl,--image-base,0x10000000

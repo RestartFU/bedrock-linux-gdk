@@ -264,7 +264,7 @@ module BedrockLinuxGdk
 
       environment = compatibility_environment(engine)
       environment["WINEGDK_PREAUTH_DEVICE"] = wine_path(
-        XboxAuth.bridge_path(root)
+        XboxAuth.preauth_path(root)
       )
       environment["WINEGDK_PREAUTH_OAUTH"] = wine_path(
         XboxAuth.oauth_path(root)
