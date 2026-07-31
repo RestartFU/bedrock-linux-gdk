@@ -25,10 +25,8 @@ module BedrockLinuxGdk
         environment["PROTON_ENABLE_WAYLAND"] = "1"
         environment.delete("DISPLAY")
         environment.delete("WINE_DISABLE_VULKAN_OPWR")
-        environment.delete("PROTON_NO_WM_DECORATION")
       else
         environment["PROTON_ENABLE_WAYLAND"] = "0"
-        environment["PROTON_NO_WM_DECORATION"] = "1"
         if wayland_session
           environment["WINE_DISABLE_VULKAN_OPWR"] = "1"
         else

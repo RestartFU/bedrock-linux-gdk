@@ -4,6 +4,7 @@ require "json"
 require "file_utils"
 require "./bedrock_linux_gdk/runtime_display"
 require "./bedrock_linux_gdk/version"
+require "./bedrock_linux_gdk/x11_window_fix"
 require "./bedrock_linux_gdk/xbox_auth"
 
 module BedrockLinuxGdk
@@ -301,6 +302,7 @@ module BedrockLinuxGdk
         "force_raw_va_cbv"
       )
       ensure_stack_reserve(game)
+      window_fix = prepare_x11_windowing(umu, environment)
       info(
         "Display backend: " \
         "#{environment["PROTON_ENABLE_WAYLAND"]? == "1" ? "Wayland" : "X11"}."
@@ -310,7 +312,8 @@ module BedrockLinuxGdk
         umu,
         [File.join(game, "Minecraft.Windows.exe")],
         environment,
-        chdir: game
+        chdir: game,
+        window_fix: window_fix
       )
       status.exit_code
     end
@@ -761,6 +764,7 @@ module BedrockLinuxGdk
       arguments : Array(String),
       environment : Hash(String, String),
       chdir : String? = nil,
+      window_fix : X11WindowFix::Session? = nil,
     ) : Process::Status
       process = Process.new(
         command,
@@ -771,7 +775,46 @@ module BedrockLinuxGdk
         output: Process::Redirect::Close,
         error: Process::Redirect::Close
       )
-      wait_for_child(process)
+      return wait_for_child(process) unless window_fix
+
+      @@active_child = process
+      finished = Channel(Process::Status).new(1)
+      spawn { finished.send(process.wait) }
+      loop do
+        select
+        when status = finished.receive
+          return status
+        when timeout(250.milliseconds)
+          window_fix.apply
+        end
+      end
+    ensure
+      window_fix.try(&.close)
+      @@active_child = nil if window_fix
+    end
+
+    private def prepare_x11_windowing(
+      umu : String,
+      environment : Hash(String, String),
+    ) : X11WindowFix::Session?
+      return if environment["PROTON_ENABLE_WAYLAND"]? == "1"
+      session = X11WindowFix.open
+      return unless session
+
+      X11WindowFix.registry_commands(
+        session.screen_width,
+        session.screen_height
+      ).each do |arguments|
+        status = run_compatibility(umu, arguments, environment)
+        unless status.success?
+          session.close
+          raise "Could not configure the stable Wine desktop."
+        end
+      end
+      session
+    rescue error
+      session.try(&.close)
+      raise error
     end
 
     private def compatibility_environment(engine : String) : Hash(String, String)
