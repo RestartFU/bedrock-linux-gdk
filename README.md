@@ -13,7 +13,7 @@ curl -fsSL https://github.com/RestartFU/bedrock-linux-gdk/releases/download/nigh
 Latest stable release:
 
 ```sh
-curl -fsSL https://github.com/RestartFU/bedrock-linux-gdk/releases/latest/download/install.sh | sh -s -- --release
+curl -fsSL https://github.com/RestartFU/bedrock-linux-gdk/releases/latest/download/install.sh | sh
 ```
 
 Open **Bedrock Linux GDK** from GNOME search.

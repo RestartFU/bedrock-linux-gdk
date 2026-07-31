@@ -127,6 +127,11 @@ jobs:
           tar -czf bedrock-linux-gdk-linux-x86_64.tar.gz bedrock-linux-gdk
           sha256sum bedrock-linux-gdk-linux-x86_64.tar.gz \
             > bedrock-linux-gdk-linux-x86_64.tar.gz.sha256
+          sed 's/^CHANNEL=nightly$/CHANNEL=release/' \
+            scripts/install.sh > install.sh
+          chmod 0755 install.sh
+          grep -Fxq 'CHANNEL=release' install.sh
+          sh -n install.sh
 
       - name: Publish release commit and tag
         if: github.event_name == 'workflow_dispatch'
@@ -144,12 +149,12 @@ jobs:
             gh release upload "$tag" --clobber \
               bedrock-linux-gdk-linux-x86_64.tar.gz \
               bedrock-linux-gdk-linux-x86_64.tar.gz.sha256 \
-              scripts/install.sh
+              install.sh
           else
             gh release create "$tag" \
               --verify-tag \
               --generate-notes \
               bedrock-linux-gdk-linux-x86_64.tar.gz \
               bedrock-linux-gdk-linux-x86_64.tar.gz.sha256 \
-              scripts/install.sh
+              install.sh
           fi

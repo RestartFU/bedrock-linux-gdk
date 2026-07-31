@@ -6,7 +6,7 @@
 #
 # Latest tagged release:
 #
-#   curl -fsSL https://github.com/RestartFU/bedrock-linux-gdk/releases/latest/download/install.sh | sh -s -- --release
+#   curl -fsSL https://github.com/RestartFU/bedrock-linux-gdk/releases/latest/download/install.sh | sh
 
 set -eu
 
