@@ -2,7 +2,6 @@ require "digest/sha256"
 require "http/client"
 require "json"
 require "file_utils"
-require "./bedrock_linux_gdk/graphics_defaults"
 require "./bedrock_linux_gdk/version"
 require "./bedrock_linux_gdk/xbox_auth"
 
@@ -283,9 +282,6 @@ module BedrockLinuxGdk
       ensure_runtime_bridge(engine)
       auth = XboxAuth.refresh(root)
       XboxAuth.seed_refresh_token(root, auth.refresh_token)
-      if GraphicsDefaults.apply(root)
-        ok("Reduced excessive first-run render distance for laptop performance.")
-      end
 
       environment = compatibility_environment(engine)
       environment["WINEGDK_PREAUTH_DEVICE"] = wine_path(
