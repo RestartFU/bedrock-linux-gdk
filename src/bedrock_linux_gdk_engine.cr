@@ -801,12 +801,23 @@ module BedrockLinuxGdk
       session = X11WindowFix.open
       return unless session
 
-      X11WindowFix.registry_commands(
-        session.screen_width,
-        session.screen_height
-      ).each do |arguments|
-        status = run_compatibility(umu, arguments, environment)
-        unless status.success?
+      registry = File.join(root, "compatdata", "pfx", "user.reg")
+      unless X11WindowFix.registry_configured?(
+               registry,
+               session.screen_width,
+               session.screen_height
+             )
+        X11WindowFix.registry_commands(
+          session.screen_width,
+          session.screen_height
+        ).each do |arguments|
+          run_compatibility(umu, arguments, environment)
+        end
+        unless X11WindowFix.registry_configured?(
+                 registry,
+                 session.screen_width,
+                 session.screen_height
+               )
           session.close
           raise "Could not configure the stable Wine desktop."
         end

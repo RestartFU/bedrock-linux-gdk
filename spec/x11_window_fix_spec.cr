@@ -60,4 +60,28 @@ describe BedrockLinuxGdk::X11WindowFix do
       "Other game"
     ).should be_false
   end
+
+  it "checks the configured Wine virtual desktop values" do
+    with_temp_dir("x11-window-fix") do |directory|
+      registry = File.join(directory, "user.reg")
+      File.write(registry, <<-REGISTRY)
+        [Software\\\\Wine\\\\Explorer] 1785466373
+        "Desktop"="Default"
+
+        [Software\\\\Wine\\\\Explorer\\\\Desktops] 1785466373
+        "Default"="2560x1440"
+        REGISTRY
+
+      BedrockLinuxGdk::X11WindowFix.registry_configured?(
+        registry,
+        2560,
+        1440
+      ).should be_true
+      BedrockLinuxGdk::X11WindowFix.registry_configured?(
+        registry,
+        1920,
+        1080
+      ).should be_false
+    end
+  end
 end

@@ -48,6 +48,22 @@ module BedrockLinuxGdk
       ]
     end
 
+    def registry_configured?(path : String, width : Int32, height : Int32) : Bool
+      content = File.read(path)
+      registry_value(
+        content,
+        "[Software\\\\Wine\\\\Explorer]",
+        "Desktop"
+      ) == "Default" &&
+        registry_value(
+          content,
+          "[Software\\\\Wine\\\\Explorer\\\\Desktops]",
+          "Default"
+        ) == "#{width}x#{height}"
+    rescue File::Error
+      false
+    end
+
     def target_identity?(name : String, klass : String, title : String) : Bool
       normalized_name = name.downcase
       normalized_class = klass.downcase
@@ -55,6 +71,27 @@ module BedrockLinuxGdk
 
       title == TARGET_TITLE &&
         (normalized_name == UMU_CLASS || normalized_class == UMU_CLASS)
+    end
+
+    private def registry_value(
+      content : String,
+      section : String,
+      name : String,
+    ) : String?
+      current_section = ""
+      prefix = %Q{"#{name}"="}
+      content.each_line do |raw_line|
+        line = raw_line.strip
+        if line.starts_with?('[') && (closing = line.index(']'))
+          current_section = line[0..closing]
+          next
+        end
+        next unless current_section == section
+        next unless line.starts_with?(prefix) && line.ends_with?('"')
+
+        return line[prefix.size, line.size - prefix.size - 1]
+      end
+      nil
     end
 
     def open : Session?
