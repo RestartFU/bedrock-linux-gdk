@@ -315,7 +315,6 @@ module BedrockLinuxGdk
       account = XboxAuth.sign_in(root) do |url, code|
         puts "device\t#{url}\t#{code}"
       end
-      XboxAuth.seed_refresh_token(root, account.refresh_token)
       write_json(
         File.join(root, "account.json"),
         JSON.parse({
