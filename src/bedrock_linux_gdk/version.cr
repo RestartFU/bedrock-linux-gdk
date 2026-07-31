@@ -1,5 +1,5 @@
 module BedrockLinuxGdk
-  VERSION = "0.1.1"
+  VERSION = "0.1.2"
 
   BUILD_PROFILE = {{ env("BEDROCK_BUILD_PROFILE") || "default" }}
   BUILD_COMMIT  = {{ env("BEDROCK_BUILD_COMMIT") || "" }}
