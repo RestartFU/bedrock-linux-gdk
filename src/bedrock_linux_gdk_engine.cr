@@ -2,6 +2,7 @@ require "digest/sha256"
 require "http/client"
 require "json"
 require "file_utils"
+require "./bedrock_linux_gdk/runtime_display"
 require "./bedrock_linux_gdk/version"
 require "./bedrock_linux_gdk/xbox_auth"
 
@@ -300,6 +301,10 @@ module BedrockLinuxGdk
         "force_raw_va_cbv"
       )
       ensure_stack_reserve(game)
+      info(
+        "Display backend: " \
+        "#{environment["PROTON_ENABLE_WAYLAND"]? == "1" ? "Wayland" : "X11"}."
+      )
       info("Starting Minecraft.")
       status = run_compatibility(
         umu,
@@ -778,14 +783,8 @@ module BedrockLinuxGdk
       environment["PROTON_USE_WOW64"] = "1"
       environment["UMU_FOLDERS_PATH"] = shared_root
       environment["UMU_RUNTIME_UPDATE"] = "0"
-      unless environment["WAYLAND_DISPLAY"]?.to_s.strip.empty?
-        environment["PROTON_ENABLE_WAYLAND"] = "1"
-        environment.delete("DISPLAY")
-        environment.delete("WINE_DISABLE_VULKAN_OPWR")
-      else
-        environment["PROTON_ENABLE_WAYLAND"] = "0"
-        environment.delete("WINE_DISABLE_VULKAN_OPWR")
-      end
+      preference = load_settings["input_backend"]?.try(&.as_s?) || "auto"
+      RuntimeDisplay.apply(environment, preference)
       environment
     end
 
