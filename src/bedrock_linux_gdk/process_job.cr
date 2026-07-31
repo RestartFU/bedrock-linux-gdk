@@ -4,6 +4,7 @@ require "./host_environment"
 module BedrockLinuxGdk
   class ProcessJob
     getter running = false
+    getter stopping = false
 
     @process : Gio::Subprocess?
     @stream : Gio::DataInputStream?
@@ -54,6 +55,7 @@ module BedrockLinuxGdk
       @read_done = false
       @wait_done = false
       @running = true
+      @stopping = false
 
       read_next_line
       process.wait_async(@cancellable) do |_source, result|
@@ -78,9 +80,23 @@ module BedrockLinuxGdk
       false
     end
 
-    def stop : Nil
-      @process.try(&.force_exit)
+    def stop : Bool
+      return false unless @running
+      return false if @stopping
+
+      @stopping = true
+      process = @process
+      process.try(&.send_signal(Signal::TERM.value))
+      GLib.timeout(1.second) do
+        if @running && @process == process
+          process.try(&.force_exit)
+        end
+        false
+      end
+      true
     rescue
+      @process.try(&.force_exit)
+      true
     end
 
     private def read_next_line : Nil
@@ -125,6 +141,7 @@ module BedrockLinuxGdk
       @read_done = false
       @wait_done = false
       @running = false
+      @stopping = false
     end
   end
 end

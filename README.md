@@ -20,16 +20,18 @@ Open **Bedrock Linux GDK** from GNOME search.
 
 ## Use
 
-1. Choose a Minecraft version.
-2. Press **Play**. Missing game files install automatically.
-3. Add a Microsoft account and complete browser sign-in.
+1. Add a Microsoft account and complete browser sign-in.
+2. Choose a Minecraft version.
+3. Press **Play**. Missing game files install automatically.
+
+Signing in never downloads or starts Minecraft.
 
 Each Microsoft account gets its own profile, worlds, credentials, and Wine
 prefix. Minecraft downloads are shared between accounts. Multiple accounts can
 run simultaneously.
 
 Use **Uninstall** to remove the selected game version without deleting
-accounts or worlds. Open an account's profile directory from account manager.
+accounts or worlds. Folder button opens that account's `com.mojang` game data.
 
 Data lives in:
 

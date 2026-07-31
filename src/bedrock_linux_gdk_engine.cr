@@ -9,6 +9,13 @@ module BedrockLinuxGdk
   module Engine
     extend self
 
+    @@active_child : Process?
+
+    Signal::TERM.trap do
+      terminate_active_child
+      exit(130)
+    end
+
     RELEASES_URL       = "https://api.github.com/repos/bubbles-wow/mcbe-gdk-unpack-archive/releases?per_page=100"
     PROTON_RELEASE_URL = "https://api.github.com/repos/Weather-OS/GDK-Proton/releases/latest"
     UMU_RELEASE_URL    = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest"
@@ -193,24 +200,24 @@ module BedrockLinuxGdk
       unless File.file?(archive) && File.size(archive) == release.size
         partial = "#{archive}.partial"
         info("Downloading Minecraft #{release.tag} …")
-        status = Process.run(
+        status = download_with_progress(
           curl,
-          ["--fail", "--location", "--output", partial, release.url],
-          output: Process::Redirect::Inherit,
-          error: Process::Redirect::Inherit
+          release.url,
+          partial,
+          release.size,
+          "Downloading Minecraft #{release.tag}"
         )
         raise "Minecraft download failed." unless status.success?
         File.rename(partial, archive)
       end
 
+      progress(nil, "Installing Minecraft #{release.tag}")
       FileUtils.rm_r(staging) if Dir.exists?(staging)
       Dir.mkdir_p(staging, 0o700)
       info("Installing Minecraft #{release.tag} …")
-      status = Process.run(
+      status = run_quiet(
         unzip,
-        ["-q", archive, "-d", staging],
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        ["-q", archive, "-d", staging]
       )
       raise "Minecraft archive extraction failed." unless status.success?
       game = find_game_root(staging) || raise "Minecraft archive is incomplete."
@@ -304,14 +311,7 @@ module BedrockLinuxGdk
     end
 
     private def login : Int32
-      game = selected_game ||
-             raise "Install Minecraft before signing in."
-      engine = proton ||
-               raise "Compatibility engine missing — run Install / Update."
-      prefix = File.join(root, "compatdata", "pfx")
-      raise "Wine prefix missing — run Install / Update." unless File.file?(File.join(prefix, "system.reg"))
-
-      ensure_runtime_bridge(engine)
+      Dir.mkdir_p(root, 0o700)
       account = XboxAuth.sign_in(root) do |url, code|
         puts "device\t#{url}\t#{code}"
       end
@@ -675,12 +675,13 @@ module BedrockLinuxGdk
       download(GAME_INPUT_URL, archive, 0_i64)
       unzip = find_command("unzip") || raise "unzip is missing."
       File.open(installer, "wb", perm: 0o600) do |output|
-        status = Process.run(
+        process = Process.new(
           unzip,
           ["-p", archive, "redist/GameInputRedist.msi"],
           output: output,
-          error: Process::Redirect::Inherit
+          error: Process::Redirect::Close
         )
+        status = wait_for_child(process)
         raise "GameInput archive extraction failed." unless status.success?
       end
 
@@ -757,19 +758,16 @@ module BedrockLinuxGdk
       environment : Hash(String, String),
       chdir : String? = nil,
     ) : Process::Status
-      File.open("/dev/null", "r") do |input|
-        File.open("/dev/null", "w") do |output|
-          Process.run(
-            command,
-            arguments,
-            env: environment,
-            chdir: chdir,
-            input: input,
-            output: output,
-            error: output
-          )
-        end
-      end
+      process = Process.new(
+        command,
+        arguments,
+        env: environment,
+        chdir: chdir,
+        input: Process::Redirect::Close,
+        output: Process::Redirect::Close,
+        error: Process::Redirect::Close
+      )
+      wait_for_child(process)
     end
 
     private def compatibility_environment(engine : String) : Hash(String, String)
@@ -828,11 +826,12 @@ module BedrockLinuxGdk
       Dir.mkdir_p(File.dirname(path), 0o700)
       partial = "#{path}.partial"
       info("Downloading #{File.basename(path)} …")
-      status = Process.run(
+      status = download_with_progress(
         curl,
-        ["--fail", "--location", "--output", partial, url],
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        url,
+        partial,
+        size,
+        "Downloading #{File.basename(path)}"
       )
       raise "Dependency download failed." unless status.success?
       if size > 0 && File.size(partial) != size
@@ -841,15 +840,84 @@ module BedrockLinuxGdk
       File.rename(partial, path)
     end
 
+    private def download_with_progress(
+      curl : String,
+      url : String,
+      partial : String,
+      expected_size : Int64,
+      label : String,
+    ) : Process::Status
+      File.delete(partial) if File.exists?(partial)
+      process = Process.new(
+        curl,
+        [
+          "--fail",
+          "--location",
+          "--silent",
+          "--show-error",
+          "--output",
+          partial,
+          url,
+        ],
+        output: Process::Redirect::Close,
+        error: Process::Redirect::Close
+      )
+      @@active_child = process
+      finished = Channel(Process::Status).new(1)
+      spawn { finished.send(process.wait) }
+
+      status = loop do
+        select
+        when result = finished.receive
+          break result
+        when timeout(200.milliseconds)
+          if expected_size > 0 && File.file?(partial)
+            fraction = {File.size(partial).to_f64 / expected_size, 1.0}.min
+            progress(fraction, label)
+          else
+            progress(nil, label)
+          end
+        end
+      end
+      progress(1.0, label) if status.success?
+      status
+    ensure
+      @@active_child = nil
+    end
+
     private def extract_tar(archive : String, destination : String) : Nil
       tar = find_command("tar") || raise "tar is missing."
-      status = Process.run(
+      status = run_quiet(
         tar,
-        ["-xf", archive, "-C", destination],
-        output: Process::Redirect::Inherit,
-        error: Process::Redirect::Inherit
+        ["-xf", archive, "-C", destination]
       )
       raise "Dependency archive extraction failed." unless status.success?
+    end
+
+    private def run_quiet(
+      command : String,
+      arguments : Array(String),
+    ) : Process::Status
+      process = Process.new(
+        command,
+        arguments,
+        input: Process::Redirect::Close,
+        output: Process::Redirect::Close,
+        error: Process::Redirect::Close
+      )
+      wait_for_child(process)
+    end
+
+    private def wait_for_child(process : Process) : Process::Status
+      @@active_child = process
+      process.wait
+    ensure
+      @@active_child = nil
+    end
+
+    private def terminate_active_child : Nil
+      @@active_child.try(&.signal(Signal::TERM))
+    rescue
     end
 
     private def proton : String?
@@ -905,6 +973,12 @@ module BedrockLinuxGdk
 
     private def info(message : String) : Nil
       puts "info   #{message}"
+    end
+
+    private def progress(fraction : Float64?, message : String) : Nil
+      value = fraction ? fraction.clamp(0.0, 1.0).round(4) : -1.0
+      puts "progress\t#{value}\t#{message}"
+      STDOUT.flush
     end
 
     private def ok(message : String) : Nil

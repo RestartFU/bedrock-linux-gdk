@@ -159,6 +159,22 @@ module BedrockLinuxGdk
         color: alpha(#ffffff, 0.58);
       }
 
+      .gdk-progress {
+        min-height: 18px;
+      }
+
+      .gdk-progress trough {
+        min-height: 8px;
+        background: alpha(#ffffff, 0.08);
+        border-radius: 9999px;
+      }
+
+      .gdk-progress progress {
+        min-height: 8px;
+        background: #22c55e;
+        border-radius: 9999px;
+      }
+
       .gdk-success {
         color: #4ade80;
       }

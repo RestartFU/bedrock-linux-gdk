@@ -44,5 +44,45 @@ module BedrockLinuxGdk
     def logs_dir : String
       File.join(data_dir, "logs")
     end
+
+    def game_data_dir : String
+      users = File.join(
+        data_dir,
+        "compatdata",
+        "pfx",
+        "drive_c",
+        "users",
+        "steamuser",
+        "AppData",
+        "Roaming",
+        "Minecraft Bedrock",
+        "Users"
+      )
+      if Dir.exists?(users)
+        Dir.each_child(users) do |name|
+          next if name == "Shared"
+          candidate = File.join(users, name, "games", "com.mojang")
+          return candidate if Dir.exists?(candidate)
+        end
+      end
+
+      File.join(users, "Shared", "games", "com.mojang")
+    rescue File::Error
+      File.join(
+        data_dir,
+        "compatdata",
+        "pfx",
+        "drive_c",
+        "users",
+        "steamuser",
+        "AppData",
+        "Roaming",
+        "Minecraft Bedrock",
+        "Users",
+        "Shared",
+        "games",
+        "com.mojang"
+      )
+    end
   end
 end

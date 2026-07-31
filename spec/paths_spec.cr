@@ -36,4 +36,32 @@ describe BedrockLinuxGdk::Paths do
     paths.data_dir.should eq("/profiles/player-two")
     paths.games_dir.should eq("/games/bedrock/games")
   end
+
+  it "resolves account-owned Minecraft data" do
+    paths = BedrockLinuxGdk::Paths.new(
+      "/home/test",
+      {"BEDROCK_LINUX_GDK_HOME" => "/profiles/creeper"}
+    )
+    paths.game_data_dir.should eq(
+      "/profiles/creeper/compatdata/pfx/drive_c/users/steamuser/" \
+      "AppData/Roaming/Minecraft Bedrock/Users/Shared/games/com.mojang"
+    )
+  end
+
+  it "prefers Minecraft's existing account data directory" do
+    with_temp_dir("bedrock-game-data") do |home|
+      profile = File.join(home, "profile")
+      game_data = File.join(
+        profile,
+        "compatdata/pfx/drive_c/users/steamuser/AppData/Roaming/" \
+        "Minecraft Bedrock/Users/8675309/games/com.mojang"
+      )
+      Dir.mkdir_p(game_data)
+      paths = BedrockLinuxGdk::Paths.new(
+        home,
+        {"BEDROCK_LINUX_GDK_HOME" => profile}
+      )
+      paths.game_data_dir.should eq(game_data)
+    end
+  end
 end

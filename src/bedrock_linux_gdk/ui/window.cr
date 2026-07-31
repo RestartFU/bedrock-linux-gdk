@@ -26,6 +26,8 @@ module BedrockLinuxGdk
       @refreshing_versions = false
       @syncing_version = false
       @syncing_session = false
+      @operation_cancelled = false
+      @progress_indeterminate = false
       @nav_buttons = {} of String => Gtk::Button
 
       def initialize(application : Gtk::Application)
@@ -82,7 +84,7 @@ module BedrockLinuxGdk
         @cancel_button = Gtk::Button.new_with_label("Cancel")
         @cancel_button.add_css_class("destructive-action")
         @cancel_button.visible = false
-        @cancel_button.clicked_signal.connect { @job.stop }
+        @cancel_button.clicked_signal.connect { cancel_operation }
 
         @status_label = Gtk::Label.new("")
         @status_label.xalign = 0_f32
@@ -90,6 +92,11 @@ module BedrockLinuxGdk
 
         @spinner = Gtk::Spinner.new
         @spinner.visible = false
+
+        @progress_bar = Gtk::ProgressBar.new
+        @progress_bar.show_text = true
+        @progress_bar.visible = false
+        @progress_bar.add_css_class("gdk-progress")
 
         @log_view = Gtk::TextView.new
         @log_view.editable = false
@@ -120,6 +127,12 @@ module BedrockLinuxGdk
         GLib.timeout(120.milliseconds) do
           refresh_versions
           false
+        end
+        GLib.timeout(120.milliseconds) do
+          if @progress_bar.visible? && @progress_indeterminate
+            @progress_bar.pulse
+          end
+          true
         end
       end
 
@@ -293,6 +306,7 @@ module BedrockLinuxGdk
         hero = Gtk::Box.new(:vertical, 12)
         hero.append(hero_head)
         hero.append(choices)
+        hero.append(@progress_bar)
         hero.append(footer)
         hero.add_css_class("gdk-card")
         hero.add_css_class("gdk-hero")
@@ -727,8 +741,6 @@ module BedrockLinuxGdk
       private def preflight_install(
         version : VersionEntry,
         launch_after : Bool,
-        sign_in_after : Bool = false,
-        pending_sign_in : Bool = false,
       ) : Nil
         run_operation(
           "Checking system requirements",
@@ -742,18 +754,11 @@ module BedrockLinuxGdk
                   if installed
                     mark_version_installed(version.tag)
                     refresh_install_state
-                    if sign_in_after
-                      start_sign_in(pending_profile: pending_sign_in)
-                    elsif launch_after
-                      play
-                    end
-                  elsif pending_sign_in
-                    discard_pending_profile(@current_session)
+                    play if launch_after
                   end
                 }
               )
             else
-              discard_pending_profile(@current_session) if pending_sign_in
               Dialogs.error(
                 @widget,
                 "System check failed",
@@ -799,31 +804,16 @@ module BedrockLinuxGdk
         append_log("warn: could not write setup marker: #{error.message}")
       end
 
-      private def start_sign_in(pending_profile : Bool = false) : Nil
+      private def start_sign_in(
+        pending_profile : Bool = false,
+        fallback_key : String = "default",
+      ) : Nil
         state = AccountState.read(@paths)
         if state.signed_in
           append_log("Microsoft account already linked.")
           return
         end
 
-        version = selected_version
-        unless version
-          Dialogs.error(
-            @widget,
-            "Minecraft versions are still loading",
-            "Wait for the version list, then try again."
-          )
-          return
-        end
-        unless version_installed?(version.tag)
-          preflight_install(
-            version,
-            launch_after: false,
-            sign_in_after: true,
-            pending_sign_in: pending_profile
-          )
-          return
-        end
         return if @job.running
 
         dialog, content, footer = panel_window(
@@ -874,13 +864,20 @@ module BedrockLinuxGdk
 
         cancel = Gtk::Button.new_with_label("Cancel")
         cancel.add_css_class("gdk-panel-action")
+        cancelled = false
         cancel.clicked_signal.connect do
+          cancelled = true
+          cancel.label = "Cancelling…"
+          cancel.sensitive = false
           @job.stop
           dialog.destroy
         end
         footer.append(cancel)
         dialog.destroy_signal.connect do
-          @job.stop if @job.running
+          if @job.running
+            cancelled = true
+            @job.stop
+          end
         end
 
         session = @current_session
@@ -920,9 +917,12 @@ module BedrockLinuxGdk
                 reload_sessions(selected_key: selected_key)
                 append_log("✓ Microsoft sign-in complete")
                 dialog.destroy
+              elsif cancelled
+                discard_pending_profile(session, fallback_key) if pending_profile
+                append_log("Microsoft sign-in cancelled.")
               else
                 if pending_profile
-                  discard_pending_profile(session)
+                  discard_pending_profile(session, fallback_key)
                 end
                 dialog.destroy
                 Dialogs.error(
@@ -971,14 +971,25 @@ module BedrockLinuxGdk
 
           folder = Gtk::Button.new_from_icon_name("folder-open-symbolic")
           folder.valign = :center
-          folder.tooltip_text = "Open profile folder"
+          folder.tooltip_text = "Open Minecraft game data"
           folder.add_css_class("flat")
           folder.clicked_signal.connect do
-            unless HostLaunch.open_path(session.data_dir)
+            game_data = paths.game_data_dir
+            begin
+              Dir.mkdir_p(game_data, 0o700)
+            rescue error : File::Error
               Dialogs.error(
                 dialog,
-                "Could not open profile folder",
-                session.data_dir
+                "Could not create game-data folder",
+                error.message || game_data
+              )
+              next
+            end
+            unless HostLaunch.open_path(game_data)
+              Dialogs.error(
+                dialog,
+                "Could not open game-data folder",
+                game_data
               )
             end
           end
@@ -1016,6 +1027,7 @@ module BedrockLinuxGdk
         add.add_css_class("suggested-action")
         add.clicked_signal.connect do
           begin
+            fallback_key = @current_session.key
             previous_version = @settings.string("mc_version")
             session = @session_store.create_pending
             unless previous_version.empty?
@@ -1024,7 +1036,10 @@ module BedrockLinuxGdk
             end
             reload_sessions(selected_key: session.key)
             dialog.destroy
-            start_sign_in(pending_profile: true)
+            start_sign_in(
+              pending_profile: true,
+              fallback_key: fallback_key
+            )
           rescue error : ArgumentError | File::Error
             Dialogs.error(
               dialog,
@@ -1101,9 +1116,12 @@ module BedrockLinuxGdk
         session.key
       end
 
-      private def discard_pending_profile(session : LaunchSession) : Nil
+      private def discard_pending_profile(
+        session : LaunchSession,
+        fallback_key : String = "default",
+      ) : Nil
         @session_store.delete_pending(session)
-        reload_sessions(selected_key: "default")
+        reload_sessions(selected_key: fallback_key)
       rescue error : ArgumentError | File::Error
         append_log("warn: could not remove incomplete account: #{error.message}")
       end
@@ -1226,22 +1244,33 @@ module BedrockLinuxGdk
         environment = session.environment(HostEnvironment.values)
         command = @backend.command(arguments)
         lines = [] of String
+        @operation_cancelled = false
         append_log("› #{label} · #{session.name}")
         set_busy(true, label)
 
         @job.start(
           command,
           ->(line : String) {
-            lines << line
-            GLib.idle_add do
-              append_log(line)
-              false
+            if line.starts_with?("progress\t")
+              GLib.idle_add do
+                update_progress(line)
+                false
+              end
+            else
+              lines << line
+              GLib.idle_add do
+                append_log(line)
+                false
+              end
             end
           },
           ->(exit_code : Int32?, error : String?) {
-            success = exit_code == 0 && error.nil?
+            cancelled = @operation_cancelled
+            success = !cancelled && exit_code == 0 && error.nil?
             GLib.idle_add do
-              if error
+              if cancelled
+                append_log("Cancelled #{label.downcase}.")
+              elsif error
                 append_log("error: #{error}")
               elsif success
                 append_log("✓ #{label} complete")
@@ -1251,8 +1280,16 @@ module BedrockLinuxGdk
                   "#{exit_code ? " (#{exit_code})" : ""}"
                 )
               end
-              set_busy(false, success ? "Ready" : "#{label} failed")
-              after.try(&.call(lines, success))
+              status = if cancelled
+                         "Cancelled"
+                       elsif success
+                         "Ready"
+                       else
+                         "#{label} failed"
+                       end
+              set_busy(false, status)
+              after.try(&.call(lines, success)) unless cancelled
+              @operation_cancelled = false
               false
             end
           },
@@ -1273,9 +1310,50 @@ module BedrockLinuxGdk
         @version_row.sensitive = !busy && !@versions.empty?
         @session_row.sensitive = !busy
         @cancel_button.visible = busy
+        @cancel_button.label = "Cancel"
+        @cancel_button.sensitive = busy
         @spinner.visible = busy
         busy ? @spinner.start : @spinner.stop
+        @progress_bar.visible = busy
+        if busy
+          @progress_bar.fraction = 0.0
+          @progress_bar.text = status
+          @progress_indeterminate = true
+        else
+          @progress_indeterminate = false
+        end
         @status_label.text = status
+      end
+
+      private def cancel_operation : Nil
+        return unless @job.running
+
+        @operation_cancelled = true
+        return unless @job.stop
+
+        @cancel_button.label = "Cancelling…"
+        @cancel_button.sensitive = false
+        @status_label.text = "Cancelling…"
+        @progress_bar.text = "Cancelling…"
+        @progress_indeterminate = true
+      end
+
+      private def update_progress(line : String) : Nil
+        parts = line.split('\t', 3)
+        return unless parts.size == 3
+        fraction = parts[1].to_f64?
+        return unless fraction
+
+        if fraction < 0
+          @progress_bar.text = parts[2]
+          @progress_indeterminate = true
+          @progress_bar.pulse
+        else
+          percent = (fraction.clamp(0.0, 1.0) * 100).round.to_i
+          @progress_bar.text = "#{parts[2]} · #{percent}%"
+          @progress_indeterminate = false
+          @progress_bar.fraction = fraction.clamp(0.0, 1.0)
+        end
       end
 
       private def append_log(line : String) : Nil
