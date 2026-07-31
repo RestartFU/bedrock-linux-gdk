@@ -21,6 +21,7 @@ module BedrockLinuxGdk
 
       @versions = [] of VersionEntry
       @log_lines = [] of String
+      @pending_log_lines = [] of String
       @job = ProcessJob.new
       @launch_jobs = {} of String => ProcessJob
       @refreshing_versions = false
@@ -28,6 +29,8 @@ module BedrockLinuxGdk
       @syncing_session = false
       @operation_cancelled = false
       @progress_indeterminate = false
+      @progress_pulse_id = 0_u32
+      @log_flush_scheduled = false
       @nav_buttons = {} of String => Gtk::Button
 
       def initialize(application : Gtk::Application)
@@ -116,6 +119,7 @@ module BedrockLinuxGdk
         PointerCursors.apply(@widget)
         @widget.close_request_signal.connect do
           @updater.close
+          stop_progress_pulse
           false
         end
 
@@ -127,12 +131,6 @@ module BedrockLinuxGdk
         GLib.timeout(120.milliseconds) do
           refresh_versions
           false
-        end
-        GLib.timeout(120.milliseconds) do
-          if @progress_bar.visible? && @progress_indeterminate
-            @progress_bar.pulse
-          end
-          true
         end
       end
 
@@ -318,6 +316,7 @@ module BedrockLinuxGdk
         clear = Gtk::Button.new_with_label("Clear")
         clear.add_css_class("flat")
         clear.clicked_signal.connect do
+          @pending_log_lines.clear
           @log_lines.clear
           @log_view.buffer.text = ""
         end
@@ -754,7 +753,12 @@ module BedrockLinuxGdk
                   if installed
                     mark_version_installed(version.tag)
                     refresh_install_state
-                    play if launch_after
+                    if launch_after
+                      GLib.timeout(250.milliseconds) do
+                        play
+                        false
+                      end
+                    end
                   end
                 }
               )
@@ -1320,8 +1324,10 @@ module BedrockLinuxGdk
           @progress_bar.fraction = 0.0
           @progress_bar.text = status
           @progress_indeterminate = true
+          start_progress_pulse
         else
           @progress_indeterminate = false
+          stop_progress_pulse
         end
         @status_label.text = status
       end
@@ -1349,11 +1355,13 @@ module BedrockLinuxGdk
           @progress_bar.text = parts[2]
           @progress_indeterminate = true
           @progress_bar.pulse
+          start_progress_pulse
         else
           percent = (fraction.clamp(0.0, 1.0) * 100).round.to_i
           @progress_bar.text = "#{parts[2]} · #{percent}%"
           @progress_indeterminate = false
           @progress_bar.fraction = fraction.clamp(0.0, 1.0)
+          stop_progress_pulse
         end
       end
 
@@ -1361,7 +1369,23 @@ module BedrockLinuxGdk
         clean = line.strip
         return if clean.empty?
 
-        @log_lines << clean
+        @pending_log_lines << clean
+        return if @log_flush_scheduled
+
+        @log_flush_scheduled = true
+        GLib.timeout(50.milliseconds) do
+          flush_logs
+          false
+        end
+      end
+
+      private def flush_logs : Nil
+        pending = @pending_log_lines.dup
+        @pending_log_lines.clear
+        @log_flush_scheduled = false
+        return if pending.empty?
+
+        @log_lines.concat(pending)
         trimmed = false
         while @log_lines.size > 500
           @log_lines.shift
@@ -1371,14 +1395,33 @@ module BedrockLinuxGdk
         if trimmed
           buffer.text = @log_lines.join('\n')
         else
-          text = buffer.char_count.zero? ? clean : "\n#{clean}"
+          batch = pending.join('\n')
+          text = buffer.char_count.zero? ? batch : "\n#{batch}"
           buffer.insert(buffer.end_iter, text, -1)
         end
         buffer.place_cursor(buffer.end_iter)
-        GLib.idle_add do
-          @log_view.scroll_mark_onscreen(buffer.insert)
-          false
+        @log_view.scroll_mark_onscreen(buffer.insert)
+      end
+
+      private def start_progress_pulse : Nil
+        return unless @progress_pulse_id.zero?
+
+        @progress_pulse_id = GLib.timeout(160.milliseconds) do
+          if @progress_bar.visible? && @progress_indeterminate
+            @progress_bar.pulse
+            true
+          else
+            @progress_pulse_id = 0_u32
+            false
+          end
         end
+      end
+
+      private def stop_progress_pulse : Nil
+        return if @progress_pulse_id.zero?
+
+        GLib.source_remove(@progress_pulse_id)
+        @progress_pulse_id = 0_u32
       end
 
       private def refresh_account : Nil
