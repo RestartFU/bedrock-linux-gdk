@@ -12,6 +12,7 @@ module BedrockLinuxGdk
     SCOPE       = "service::user.auth.xboxlive.com::MBI_SSL"
     CONNECT_URL = "https://login.live.com/oauth20_connect.srf"
     TOKEN_URL   = "https://login.live.com/oauth20_token.srf"
+    REMOTE_URL  = "https://login.live.com/oauth20_remoteconnect.srf"
 
     record Session, refresh_token : String, user_id : String, gamertag : String
 
@@ -23,8 +24,7 @@ module BedrockLinuxGdk
       })
       device_code = required_string(response, "device_code")
       user_code = required_string(response, "user_code")
-      verification = optional_string(response, "verification_uri") ||
-                     "https://www.microsoft.com/link"
+      verification = "#{REMOTE_URL}?#{URI::Params.encode({"otc" => user_code})}"
       yield verification, user_code
 
       interval = optional_i64(response, "interval").try(&.to_i) || 5

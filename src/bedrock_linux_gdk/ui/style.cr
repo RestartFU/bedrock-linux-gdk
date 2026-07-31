@@ -233,12 +233,6 @@ module BedrockLinuxGdk
         background: alpha(#ffffff, 0.16);
       }
 
-      .gdk-auth-code {
-        font-family: "JetBrains Mono", monospace;
-        font-size: 1.35em;
-        font-weight: 700;
-      }
-
       scrollbar, scrollbar trough {
         background: none;
         border: none;

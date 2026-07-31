@@ -818,7 +818,7 @@ module BedrockLinuxGdk
 
         dialog, content, footer = panel_window(
           "Microsoft account",
-          "Enter one-time code on Microsoft's official sign-in page.",
+          "Complete sign-in on Microsoft's official page.",
           560
         )
 
@@ -827,18 +827,14 @@ module BedrockLinuxGdk
         status.wrap = true
         status.add_css_class("title-3")
 
-        code = Gtk::Label.new("")
-        code.selectable = true
-        code.add_css_class("gdk-auth-code")
-
         hint = Gtk::Label.new(
-          "Minecraft stays closed until authentication completes."
+          "Your browser opens with sign-in already prepared. Minecraft stays closed."
         )
         hint.xalign = 0_f32
         hint.wrap = true
         hint.add_css_class("dim-label")
 
-        open = Gtk::Button.new_with_label("Open Microsoft sign-in")
+        open = Gtk::Button.new_with_label("Open Microsoft sign-in again")
         open.add_css_class("suggested-action")
         open.sensitive = false
         sign_in_url = ""
@@ -858,7 +854,6 @@ module BedrockLinuxGdk
 
         content.append(spinner)
         content.append(status)
-        content.append(code)
         content.append(hint)
         content.append(open)
 
@@ -895,8 +890,14 @@ module BedrockLinuxGdk
                 parts = line.split('\t', 3)
                 if parts.size == 3
                   sign_in_url = parts[1]
-                  code.text = parts[2]
-                  status.text = "Enter this code in your browser"
+                  opened = sign_in_url.starts_with?("https://") &&
+                           HostLaunch.open_uri(sign_in_url)
+                  status.text = opened ? "Finish sign-in in your browser" : "Open Microsoft sign-in"
+                  hint.text = if opened
+                                "Sign-in page opened and ready."
+                              else
+                                "Could not open browser automatically. Use button below."
+                              end
                   open.sensitive = sign_in_url.starts_with?("https://")
                   spinner.stop
                   spinner.visible = false
